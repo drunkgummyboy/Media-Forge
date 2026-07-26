@@ -1,0 +1,36 @@
+{
+    "TMDB_API_KEY": "a185ddeee4575632c77066660b18a6ee",
+    "presets": {
+        "Auto": {
+            "type": "auto",
+            "format": "{ny}",
+            "chk": []
+        },
+        "Movie (Folder)": {
+            "type": "movie",
+            "format": "{ny}/{ny}",
+            "chk": [
+                "chk_poster",
+                "chk_trailer"
+            ]
+        },
+        "Movie (Flat)": {
+            "type": "movie",
+            "format": "{ny}",
+            "chk": []
+        },
+        "Series (Folder)": {
+            "type": "tv",
+            "format": "{ny}/{ny} - Season {s}/{ny} - {s00e00} - {en}",
+            "chk": [
+                "chk_series_poster",
+                "chk_season_poster"
+            ]
+        },
+        "Series (Flat)": {
+            "type": "tv",
+            "format": "{ny} - {s00e00} - {en}",
+            "chk": []
+        }
+    }
+}
