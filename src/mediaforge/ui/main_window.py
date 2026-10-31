@@ -172,7 +172,8 @@ class MainShell(ctk.CTkFrame):
             if kind != self.kind and self._other_kind:
                 label = f"{label} · {self._other_kind}"
             labels.append(label)
-        self.kind_switch.configure(values=labels)
+        if labels != self.kind_switch.cget("values"):  # configuring rebuilds both halves
+            self.kind_switch.configure(values=labels)
         self.kind_switch.set(labels[list(KINDS).index(self.kind)])
 
     def _build_update_bar(self) -> None:

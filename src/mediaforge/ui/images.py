@@ -1,7 +1,7 @@
 """Posters and backdrops for the Inbox's bands, from TMDB through its disk cache.
 
-The pictures are made ready with Pillow (cropped to their frame; a backdrop darkened and faded into
-the window colour from left to right, as in the chosen mockup) and kept as Tk images in a small
+The pictures are made ready with Pillow (cropped to their frame; a backdrop as a soft wash over the
+band's colour, for a strip of fixed width at the band's right end) and kept as Tk images in a small
 LRU, on the loop thread: Tk images must never be made or freed elsewhere (see ui/gc_guard.py).
 A picture that can't be had (no key, offline, none at TMDB) is simply None: the band draws without.
 """
@@ -13,7 +13,7 @@ import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 
-from PIL import Image, ImageEnhance, ImageTk
+from PIL import Image, ImageTk
 
 from mediaforge.api.tmdb import TmdbError
 
@@ -21,6 +21,10 @@ log = logging.getLogger("mediaforge.ui")
 
 POSTER_SIZE = "w185"
 BACKDROP_SIZE = "w780"
+# How strongly a backdrop shows over the band's colour: low enough that the band's text and quiet
+# text stay readable on any picture, in light and dark (see the readability test in test_images).
+BACKDROP_STRENGTH = 0.22
+BACKDROP_FADE = 0.4  # the strip's left part, where the picture fades in from the band's colour
 type Fetch = Callable[[str, str], Awaitable[bytes | None]]
 type Key = tuple[str, str, int, int, str]
 
@@ -40,15 +44,14 @@ def render_poster(data: bytes, width: int, height: int) -> Image.Image:
 
 
 def render_backdrop(data: bytes, width: int, height: int, fade_to: str) -> Image.Image:
-    """The picture darkened, then covered from left to right with the window colour: a fifth
-    at the left edge, fully at four fifths of the way and beyond."""
+    """The picture as a soft wash over `fade_to` (the band's colour): none at the left edge, so the
+    strip joins the band seamlessly, rising to BACKDROP_STRENGTH over its first BACKDROP_FADE."""
     picture = _cover(Image.open(io.BytesIO(data)).convert("RGB"), width, height)
-    picture = ImageEnhance.Brightness(picture).enhance(0.6)
     solid = Image.new("RGB", (width, height), fade_to)
     ramp = Image.new("L", (width, 1))
-    stop = max(1, round(width * 0.8))
-    ramp.putdata([round(255 * min(1.0, 0.2 + 0.8 * x / stop)) for x in range(width)])
-    return Image.composite(solid, picture, ramp.resize((width, height)))
+    stop = max(1, round(width * BACKDROP_FADE))
+    ramp.putdata([round(255 * BACKDROP_STRENGTH * min(1.0, x / stop)) for x in range(width)])
+    return Image.composite(picture, solid, ramp.resize((width, height)))
 
 
 class ImageCache:

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from mediaforge.ui.theme import FONT_FAMILY, MONO_FAMILY, TINTS, Palette
 
 THUMB_COLOURS = TINTS
+BACKDROP_WIDTH = 420  # a band's picture strip, in unscaled pixels
 
 
 class Row(BaseModel):
@@ -72,7 +73,8 @@ class VirtualList(ctk.CTkFrame):
         self.on_remove: Callable[[int], None] = lambda key: None
         self.on_toggle: Callable[[int, bool], None] = lambda key, value: None
         self.on_action: Callable[[int, str], None] = lambda key, action: None
-        # A band's (poster, backdrop) Tk images for its size, or None while not (yet) loaded.
+        # A band's (poster, backdrop) Tk images, asked with `backdrop_size` (one size whatever the
+        # window's, so a resize never needs new pictures), or None while not (yet) loaded.
         self.images: Callable[[Row, int, int], tuple[Any, Any]] = lambda row, w, h: (None, None)
         self._hits: list[tuple[int, int, int, int, int, str]] = []  # buttons, canvas coordinates
         self.removable = removable
@@ -90,6 +92,7 @@ class VirtualList(ctk.CTkFrame):
         self._group_h = round(group_height * scale)
         self._band_h = round(band_height * scale)
         self._section_h = round(section_height * scale)
+        self.backdrop_size = (round(BACKDROP_WIDTH * scale), self._band_h - 6)
         self._pad = round(8 * scale)
         self._box = round(16 * scale)
         size = lambda px: -round(px * scale)  # noqa: E731 - negative = pixels
@@ -304,13 +307,12 @@ class VirtualList(ctk.CTkFrame):
         inset = round(6 * self._get_widget_scaling())
         poster_h = y1 - y0 - 2 * inset
         poster_w = round(poster_h * 2 / 3)
-        poster, backdrop = self.images(row, x1 - x0, y1 - y0)
+        poster, backdrop = self.images(row, *self.backdrop_size)
         colour = THUMB_COLOURS[zlib.crc32((row.badge or row.title).encode()) % len(THUMB_COLOURS)]
-        if backdrop is not None:
-            c.create_image(x0, y0, image=backdrop, anchor="nw", tags=("band-image",))
-        else:
-            c.create_rectangle(x0, y0, x1, y1, fill=p.surface, width=0, tags=("band-fill",))
-            c.create_rectangle(x0, y0, x0 + 3, y1, fill=colour, width=0)
+        c.create_rectangle(x0, y0, x1, y1, fill=p.surface, width=0, tags=("band-fill",))
+        c.create_rectangle(x0, y0, x0 + 3, y1, fill=colour, width=0)
+        if backdrop is not None and x1 - x0 - 3 >= self.backdrop_size[0]:
+            c.create_image(x1, y0, image=backdrop, anchor="ne", tags=("band-image",))
         px, py = x0 + round(8 * self._get_widget_scaling()), y0 + inset
         if poster is not None:
             c.create_image(px, py, image=poster, anchor="nw", tags=("band-image",))

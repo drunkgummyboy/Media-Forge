@@ -220,3 +220,53 @@ async def test_coloured_codes_are_readable_in_dark(tk_root: DnDCTk, vlist: Virtu
     vlist.set_rows(many_rows(1))  # the code inside a new name (the confirm window)
     await pump(tk_root, 0.05)
     assert readable(fills()["S01E00"])
+
+
+async def test_backdrop_sits_at_the_bands_right_end(tk_root: DnDCTk, vlist: VirtualList) -> None:
+    from PIL import Image, ImageTk
+
+    width, height = vlist.backdrop_size  # one size whatever the window's: no reload on resize
+    strip = ImageTk.PhotoImage(Image.new("RGB", (width, height), "red"))
+    vlist.images = lambda row, w, h: (None, strip)
+    vlist.set_rows([band_rows(1)[1]])
+    await pump(tk_root, 0.05)
+    c = vlist.canvas
+    assert c.find_withtag("band-fill")  # the band itself is drawn under the picture
+    [image] = c.find_withtag("band-image")
+    left, _, right, _ = c.bbox(image)
+    fill_right = c.bbox(c.find_withtag("band-fill")[0])[2]
+    assert abs(right - fill_right) <= 2 and right - left <= width + 2
+
+
+async def test_a_band_too_narrow_for_its_picture_goes_without(tk_root: DnDCTk) -> None:
+    from PIL import Image, ImageTk
+
+    holder = ctk.CTkFrame(tk_root, width=300, height=200)
+    holder.place(x=0, y=0)
+    holder.pack_propagate(False)
+    v = VirtualList(holder, DARK)
+    v.pack(fill="both", expand=True)
+    strip = ImageTk.PhotoImage(Image.new("RGB", v.backdrop_size, "red"))
+    v.images = lambda row, w, h: (None, strip)
+    v.set_rows([band_rows(1)[1]])
+    await pump(tk_root, 0.05)
+    try:
+        assert not v.canvas.find_withtag("band-image")  # never spilling past the band's left
+        assert v.canvas.find_withtag("band-fill")
+    finally:
+        holder.destroy()
+
+
+async def test_bands_scroll_smoothly(tk_root: DnDCTk, vlist: VirtualList) -> None:
+    # The plan's Task 4 test: 2,000 rows of bands and lines redraw within the 1,000-file budget.
+    rows = band_rows(500, per_band=3)
+    assert len(rows) >= 2000
+    vlist.set_rows(rows)
+    await pump(tk_root, 0.05)
+    slowest = 0.0
+    for fraction in (0.1, 0.35, 0.6, 0.85, 1.0):
+        vlist.scroll_to_fraction(fraction)
+        start = time.perf_counter()
+        vlist._redraw()  # pyright: ignore[reportPrivateUsage]
+        slowest = max(slowest, time.perf_counter() - start)
+    assert slowest < 0.1

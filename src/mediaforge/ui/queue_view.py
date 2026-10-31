@@ -32,7 +32,7 @@ from mediaforge.models.history import RunSource
 from mediaforge.models.media import MediaKind
 from mediaforge.models.preset import Preset, PresetOptions
 from mediaforge.ui.detail_panel import DetailPanel
-from mediaforge.ui.images import ImageCache
+from mediaforge.ui.images import ImageCache, Key
 from mediaforge.ui.match_picker import MatchPicker
 from mediaforge.ui.theme import Palette, font
 from mediaforge.ui.widgets.chips import Chip
@@ -147,6 +147,13 @@ class InboxRows:
     other_kind: int = 0  # files on the other side of the switch
 
 
+_OTHER = {"series": "movies", "movies": "series"}
+_NOUNS = {"series": "shows", "movies": "movies"}
+_SIDES = {"series": "Series", "movies": "Movies"}
+_EMPTY_TITLE = "Drop video files or folders here"
+_EMPTY_HINT = "or add them with the buttons below. Nothing is renamed until you click Forge."
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
@@ -157,7 +164,21 @@ def _seasons(group: Sequence[QueueItem]) -> str:
         return ""
     if len(numbers) == 1:
         return f"Season {numbers[0]}"
-    return f"Seasons {numbers[0]}–{numbers[-1]}"
+    if numbers[-1] - numbers[0] == len(numbers) - 1:
+        return f"Seasons {numbers[0]}–{numbers[-1]}"
+    return f"Seasons {', '.join(map(str, numbers))}"
+
+
+def _shared_folder(folders: Sequence[tuple[str, ...]]) -> str:
+    """Where a band's files go: their folder, or the part their folders share ("Show › …")."""
+    if all(f == folders[0] for f in folders):
+        return " › ".join(folders[0]) or "the same folder"
+    shared: list[str] = []
+    for parts in zip(*folders, strict=False):
+        if any(part != parts[0] for part in parts):
+            break
+        shared.append(parts[0])
+    return " › ".join([*shared, "…"]) if shared else "several folders"
 
 
 def episode_code(item: QueueItem) -> str:
@@ -206,8 +227,7 @@ def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRo
             )
             first = group[0].media
             unsure = any(i.status is ItemStatus.NEEDS_CHOICE for i in group)
-            parts = rendered[group[0].id].parts
-            where = " › ".join(parts[:-1]) or "the same folder"
+            where = _shared_folder([rendered[i.id].parts[:-1] for i in group])
             if unsure:
                 subtitle = f"TMDB isn't sure · {_plural(len(group), 'file')}"
             elif episodes:
@@ -274,13 +294,14 @@ class QueueView(ctk.CTkFrame):
         self.on_kind: Callable[[str], None] = lambda kind: None  # this side was empty
         self._bands: dict[int, list[int]] = {}
         self.images = ImageCache(self._fetch_image)
-        self._loading: set[tuple[str, str]] = set()
+        self._loading: set[Key] = set()  # pictures being fetched right now
         self.busy = False  # set by @_one_at_a_time while Preview, Forge or Undo is going
         self._targets_in_run: dict[int, Path] = {}
         self._close_after_run: Callable[[], None] | None = None
         self._pending_preset: str | None = None
         self._targets: dict[int, Path] = {}
         self._refresh_id: str | None = None
+        self._seen: set[int] = set()  # the items the last refresh showed
         self._tasks: set[asyncio.Task[Any]] = set()
         self._hint_task: asyncio.Task[None] | None = None
         self._cancel = asyncio.Event()
@@ -386,18 +407,14 @@ class QueueView(ctk.CTkFrame):
         ctk.CTkLabel(self.empty_state, text="⤓", font=font(40), text_color=p.muted).pack(
             pady=(70, 6)
         )
-        ctk.CTkLabel(
-            self.empty_state,
-            text="Drop video files or folders here",
-            font=font(15, "bold"),
-            text_color=p.text,
-        ).pack()
-        ctk.CTkLabel(
-            self.empty_state,
-            text="or add them with the buttons below. Nothing is renamed until you click Forge.",
-            font=font(12),
-            text_color=p.muted,
-        ).pack(pady=(4, 14))
+        self.empty_title = ctk.CTkLabel(
+            self.empty_state, text=_EMPTY_TITLE, font=font(15, "bold"), text_color=p.text
+        )
+        self.empty_title.pack()
+        self.empty_hint = ctk.CTkLabel(
+            self.empty_state, text=_EMPTY_HINT, font=font(12), text_color=p.muted
+        )
+        self.empty_hint.pack(pady=(4, 14))
         row = ctk.CTkFrame(self.empty_state, fg_color="transparent")
         row.pack()
         for text, command in (
@@ -504,8 +521,9 @@ class QueueView(ctk.CTkFrame):
 
     def set_kind(self, kind: str) -> None:
         """The Series | Movies switch (the Inbox shows one kind at a time)."""
-        self.kind = kind
-        self.refresh()
+        if kind != self.kind:
+            self.kind = kind
+            self.refresh()
 
     def set_format(self, fmt: str) -> None:
         self.format_var.set(fmt)
@@ -577,18 +595,28 @@ class QueueView(ctk.CTkFrame):
     def refresh(self) -> None:
         self._refresh_id = None
         items = self.services.queue.items
+        seen, self._seen = self._seen, {i.id for i in items}
         inbox = build_inbox_rows(items, self.fmt, self.kind)
-        if not inbox.rows and inbox.other_kind:  # nothing on this side: show the other one
-            self.kind = "movies" if self.kind == "series" else "series"
+        if not inbox.rows and inbox.other_kind and self._seen - seen:
+            # New files, all for the other side: show them (a click on an empty side stays).
+            self.kind = _OTHER[self.kind]
             self.on_kind(self.kind)
             inbox = build_inbox_rows(items, self.fmt, self.kind)
         self._targets, self._bands = inbox.targets, inbox.bands
         self.list.set_rows(inbox.rows)
-        if items:
+        if inbox.rows:
             self.empty_state.pack_forget()
             self.list.pack(fill="both", expand=True)
         else:
             self.list.pack_forget()
+            if items:  # everything is on the other side of the switch
+                self.empty_title.configure(text=f"No {_NOUNS[self.kind]} in the Inbox")
+                self.empty_hint.configure(
+                    text=f"The files waiting are under {_SIDES[_OTHER[self.kind]]}."
+                )
+            else:
+                self.empty_title.configure(text=_EMPTY_TITLE)
+                self.empty_hint.configure(text=_EMPTY_HINT)
             self.empty_state.pack(fill="both", expand=True)
         pending = len(self.pending_items())
         self.count_label.configure(text=f"{len(items)} file{'s' if len(items) != 1 else ''}")
@@ -608,28 +636,38 @@ class QueueView(ctk.CTkFrame):
         return await tmdb.image(path, size) if tmdb is not None else None
 
     def _images_for(self, row: Row, width: int, height: int) -> tuple[Any, Any]:
-        """A band's poster and backdrop when loaded; otherwise start loading them."""
+        """A band's poster and backdrop when loaded; otherwise start loading them (again, if the
+        cache let them go; never again once TMDB had none)."""
         inset = round(6 * self.list._get_widget_scaling())  # pyright: ignore[reportPrivateUsage]
         poster_h = height - 2 * inset
         poster_w = round(poster_h * 2 / 3)
-        fade = self.palette.main
+        fade = self.palette.surface  # the band's own colour
         poster = self.images.cached_poster(row.art, poster_w, poster_h) if row.art else None
         backdrop = (
             self.images.cached_backdrop(row.backdrop, width, height, fade) if row.backdrop else None
         )
-        wanted: list[Awaitable[Any]] = []
-        if row.art and poster is None and ("poster", row.art) not in self._loading:
-            self._loading.add(("poster", row.art))
-            wanted.append(self.images.poster(row.art, poster_w, poster_h))
-        if row.backdrop and backdrop is None and ("backdrop", row.backdrop) not in self._loading:
-            self._loading.add(("backdrop", row.backdrop))
-            wanted.append(self.images.backdrop(row.backdrop, width, height, fade))
+        wanted: list[tuple[Key, Awaitable[Any]]] = []
+        if row.art and poster is None:
+            key: Key = ("poster", row.art, poster_w, poster_h, "")
+            if self._should_load(key):
+                wanted.append((key, self.images.poster(row.art, poster_w, poster_h)))
+        if row.backdrop and backdrop is None:
+            key = ("backdrop", row.backdrop, width, height, fade)
+            if self._should_load(key):
+                wanted.append((key, self.images.backdrop(row.backdrop, width, height, fade)))
         if wanted:
+            self._loading.update(key for key, _ in wanted)
             self.spawn(self._load_images(wanted))
         return poster, backdrop
 
-    async def _load_images(self, wanted: Sequence[Awaitable[Any]]) -> None:
-        results = await asyncio.gather(*wanted)
+    def _should_load(self, key: Key) -> bool:
+        return key not in self._loading and not self.images.known_missing(key)
+
+    async def _load_images(self, wanted: Sequence[tuple[Key, Awaitable[Any]]]) -> None:
+        try:
+            results = await asyncio.gather(*(load for _, load in wanted))
+        finally:
+            self._loading.difference_update(key for key, _ in wanted)
         if any(r is not None for r in results) and self.winfo_exists():
             self.list.refresh_images()
 

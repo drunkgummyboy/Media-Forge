@@ -91,6 +91,8 @@ async def test_kind_switch_reaches_every_view(shell: MainShell) -> None:
 
 
 async def test_inbox_badge_shows_needs_count(tk_root: DnDCTk, shell: MainShell) -> None:
+    # The (empty) Inbox reports its own counts as it settles; only these are under test.
+    shell.views["queue"].on_counts = lambda needs, other: None  # type: ignore[attr-defined]
     shell.set_counts(needs=3, other_kind=2)
     await pump(tk_root, 0.05)
     assert shell.inbox_badge.winfo_ismapped() and shell.inbox_badge.cget("text") == "3"
@@ -294,3 +296,13 @@ async def test_a_switchs_chosen_part_is_readable_in_light(
             assert switch.cget("fg_color") == switch.cget("unselected_color"), switch
     finally:
         s.destroy()
+
+
+async def test_the_switch_is_not_rebuilt_when_its_labels_stay(shell: MainShell) -> None:
+    # Review: every Inbox refresh rebuilt both halves of the switch (and could eat a click).
+    shell.set_counts(needs=3, other_kind=2)
+    before = list(shell.kind_switch._buttons_dict.values())  # pyright: ignore[reportPrivateUsage]
+    shell.set_counts(needs=3, other_kind=2)
+    shell.set_counts(needs=4, other_kind=2)
+    after = list(shell.kind_switch._buttons_dict.values())  # pyright: ignore[reportPrivateUsage]
+    assert after == before

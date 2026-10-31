@@ -10,6 +10,7 @@ from mediaforge.core.matcher import Resolution
 from mediaforge.core.queue import ItemStatus
 from mediaforge.models.media import MatchState, ResolvedMedia
 from mediaforge.ui.dnd_root import DnDCTk
+from mediaforge.ui.images import ImageCache
 from mediaforge.ui.queue_view import QueueView
 from mediaforge.ui.theme import DARK
 
@@ -429,3 +430,88 @@ async def test_episode_code_shows_whatever_the_naming_rule(
     await add_and_settle(tk_root, view, tmp_path / "in")
     [line] = [r for r in view.list.rows if r.kind == "item"]
     assert line.code == "S17E03"
+
+
+async def show_with_pictures(tk_root: DnDCTk, view: QueueView, folder: Path) -> list[str]:
+    """One show band whose match has a poster and a backdrop; returns what was fetched."""
+    import io
+
+    from PIL import Image
+
+    fetched: list[str] = []
+
+    async def fetch(path: str, size: str) -> bytes:
+        fetched.append(path)
+        out = io.BytesIO()
+        Image.new("RGB", (300, 170), (90, 90, 90)).save(out, format="PNG")
+        return out.getvalue()
+
+    view.images = ImageCache(fetch)
+    make_files(folder, ["Ted.Lasso.S04E03.1080p.WEB.mkv"])
+    await add_and_settle(tk_root, view, folder)
+    for item in view.services.queue.items:
+        media = item.media.model_copy(update={"poster_path": "/p.jpg", "backdrop_path": "/b.jpg"})
+        item.resolution = Resolution(media=media)
+    view.refresh()
+    await pump(tk_root, 0.3)
+    return fetched
+
+
+def band_pictures(view: QueueView) -> int:
+    return len(view.list.canvas.find_withtag("band-image"))
+
+
+async def test_band_pictures_survive_a_resize(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Review: making the window wider left only the poster; the backdrop never came back.
+    await show_with_pictures(tk_root, view, tmp_path / "in")
+    assert band_pictures(view) == 2
+    old = tk_root.geometry()
+    width, height = tk_root.winfo_width(), tk_root.winfo_height()
+    tk_root.geometry(f"{width + 300}x{height}")
+    try:
+        await pump(tk_root, 0.4)
+        assert band_pictures(view) == 2
+    finally:
+        tk_root.geometry(old)
+
+
+async def test_pictures_come_back_after_the_cache_drops_them(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Review: a picture pushed out of the cache (200 others seen since) was never fetched again.
+    fetched = await show_with_pictures(tk_root, view, tmp_path / "in")
+    view.images._photos.clear()  # pyright: ignore[reportPrivateUsage]
+    view.list.refresh_images()
+    await pump(tk_root, 0.3)
+    assert band_pictures(view) == 2
+    assert len(fetched) == 4  # each picture fetched once more, not over and over
+
+
+async def test_clicking_an_empty_side_stays_there(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Review: with only episodes in the Inbox, clicking "Movies" jumped straight back.
+    switched: list[str] = []
+    view.on_kind = switched.append
+    make_files(tmp_path / "in", ["Ted.Lasso.S04E03.1080p.WEB.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    view.set_kind("movies")
+    view.refresh()  # any later refresh: a lookup finishing, the naming rule changing
+    await pump(tk_root, 0.2)
+    assert view.kind == "movies" and switched == []
+    assert view.empty_state.winfo_ismapped()
+    assert view.empty_title.cget("text") == "No movies in the Inbox"
+
+
+async def test_a_band_with_several_seasons_names_them_and_their_shared_folder(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Review: "Seasons 1–3 → … › Season 01" for seasons 1 and 3, as if all went to Season 01.
+    make_files(tmp_path / "in", ["VisionQuest.S01E01.mkv", "VisionQuest.S03E02.mkv"])
+    view.select_preset("Series (Folder)")
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    [band] = [r for r in view.list.rows if r.kind == "band"]
+    assert band.subtitle.startswith("Seasons 1, 3 · 2 episodes → VisionQuest")
+    assert "Season 01" not in band.subtitle
