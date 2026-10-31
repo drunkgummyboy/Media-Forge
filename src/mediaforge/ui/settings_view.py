@@ -139,6 +139,9 @@ class SettingsView(ctk.CTkFrame):
             font=font(12, "bold" if main else "normal"),
         )
 
+    def set_kind(self, kind: str) -> None:
+        """The Series | Movies switch: not used here (History mixes both; see the 1.2 plan)."""
+
     def on_show(self) -> None:
         self.spawn(self.reload())
 

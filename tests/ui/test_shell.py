@@ -69,11 +69,52 @@ async def test_settings_preset_changes_reach_the_queue_dropdown(
     assert "Brand New" in [p.name for p in queue.presets]
 
 
-async def test_rail_highlight_follows_view(shell: MainShell) -> None:
+async def test_band_shows_pages_and_marks_the_current(tk_root: DnDCTk, shell: MainShell) -> None:
+    assert [b.cget("text") for b in shell.page_buttons.values()] == ["Inbox", "History", "Settings"]
     shell.show_view("history")
-    assert shell.rail_buttons["history"].cget("fg_color") == DARK.raised
-    assert shell.rail_buttons["history"].cget("text_color") == DARK.accent
-    assert shell.rail_buttons["queue"].cget("fg_color") == "transparent"
+    await pump(tk_root, 0.05)
+    assert shell.page_buttons["history"].cget("text_color") == DARK.text
+    assert shell.page_buttons["queue"].cget("text_color") == DARK.muted
+    assert shell.page_marks["history"].cget("fg_color") == DARK.accent
+    assert shell.page_marks["queue"].cget("fg_color") == DARK.rail
+
+
+async def test_kind_switch_reaches_every_view(shell: MainShell) -> None:
+    seen: list[tuple[str, str]] = []
+    for name, view in shell.views.items():
+        view.set_kind = lambda kind, n=name: seen.append((n, kind))  # type: ignore[attr-defined]
+    assert shell.kind == "series" and shell.kind_switch.get() == "Series"
+    shell.set_kind("movies")
+    assert shell.kind == "movies" and shell.kind_switch.get().startswith("Movies")
+    assert sorted(seen) == [("history", "movies"), ("queue", "movies"), ("settings", "movies")]
+
+
+async def test_inbox_badge_shows_needs_count(tk_root: DnDCTk, shell: MainShell) -> None:
+    shell.set_counts(needs=3, other_kind=2)
+    await pump(tk_root, 0.05)
+    assert shell.inbox_badge.winfo_ismapped() and shell.inbox_badge.cget("text") == "3"
+    assert shell.kind_switch.cget("values") == ["Series", "Movies · 2"]
+    assert shell.kind_switch.get() == "Series"
+    shell.set_kind("movies")
+    shell.set_counts(needs=0, other_kind=4)
+    await pump(tk_root, 0.05)
+    assert not shell.inbox_badge.winfo_ismapped()
+    assert shell.kind_switch.cget("values") == ["Series · 4", "Movies"]
+    assert shell.kind_switch.get() == "Movies"
+
+
+async def test_band_fits_the_minimum_window(tk_root: DnDCTk, shell: MainShell) -> None:
+    # Review focus 5: nothing in the band is pushed off at the smallest window size.
+    old = tk_root.geometry()
+    tk_root.geometry("1000x640")
+    try:
+        await pump(tk_root, 0.3)
+        right = shell.winfo_rootx() + shell.winfo_width()
+        for widget in (*shell.page_buttons.values(), shell.kind_switch, shell.status_label):
+            assert widget.winfo_ismapped()
+            assert widget.winfo_rootx() + widget.winfo_width() <= right
+    finally:
+        tk_root.geometry(old)
 
 
 async def test_log_strip_shows_records(tk_root: DnDCTk, shell: MainShell) -> None:

@@ -285,6 +285,9 @@ class HistoryView(ctk.CTkFrame):
         task.add_done_callback(self._tasks.discard)
         return task
 
+    def set_kind(self, kind: str) -> None:
+        """The Series | Movies switch: not used here (History mixes both; see the 1.2 plan)."""
+
     def on_show(self) -> None:
         self.spawn(self.reload())
 

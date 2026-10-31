@@ -10,7 +10,7 @@ import asyncio
 import logging
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import customtkinter as ctk
 from async_tkinter_loop import async_handler
@@ -32,11 +32,9 @@ log = logging.getLogger("mediaforge.ui")
 
 UPDATE_CHECK_DELAY_S = 10.0  # after start, so the update check never slows the window down
 
-VIEW_ICONS: dict[str, tuple[str, str]] = {
-    "queue": ("☰", "Queue"),
-    "history": ("⟲", "History"),
-    "settings": ("⚙", "Settings"),
-}
+PAGES: dict[str, str] = {"queue": "Inbox", "history": "History", "settings": "Settings"}
+KINDS: dict[str, str] = {"series": "Series", "movies": "Movies"}
+type Kind = Literal["series", "movies"]
 
 
 class MainShell(ctk.CTkFrame):
@@ -46,54 +44,134 @@ class MainShell(ctk.CTkFrame):
         self.palette = palette
         self.current_view: str = ""
         self.views: dict[str, ctk.CTkFrame] = {}
-        self.rail_buttons: dict[str, ctk.CTkButton] = {}
+        self.page_buttons: dict[str, ctk.CTkButton] = {}
+        self.page_marks: dict[str, ctk.CTkFrame] = {}
+        self.kind: Kind = "series"
+        self._other_kind = 0
         self._tasks: set[asyncio.Task[Any]] = set()
         self.restart_requested = False
         self.on_close: Callable[[], None] = lambda: None  # MainWindow: close the window
 
-        self.grid_columnconfigure(1, weight=1)
-        self.grid_rowconfigure(0, weight=1)
-        self._build_rail()
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self._build_band()
         self.content = ctk.CTkFrame(self, fg_color=palette.main, corner_radius=0)
-        self.content.grid(row=0, column=1, sticky="nsew")
+        self.content.grid(row=1, column=0, sticky="nsew")
         self.content.grid_columnconfigure(0, weight=1)
         self.content.grid_rowconfigure(0, weight=1)
         self._build_update_bar()
         self.log_strip = LogStrip(self, services.log_bridge, palette)
-        self.log_strip.grid(row=2, column=1, sticky="ew")
+        self.log_strip.grid(row=3, column=0, sticky="ew")
 
-        for name, (_, label) in VIEW_ICONS.items():
+        for name, label in PAGES.items():
             self.set_view(name, self._placeholder(label))
         self.build_views()
         self.show_view("queue")
 
     # --- layout ----------------------------------------------------------------------------
 
-    def _build_rail(self) -> None:
+    def _build_band(self) -> None:
+        """AirGrabber's top band: name, the Series | Movies switch, the pages, the status."""
         p = self.palette
-        rail = ctk.CTkFrame(self, width=52, fg_color=p.rail, corner_radius=0)
-        rail.grid(row=0, column=0, rowspan=3, sticky="ns")
-        rail.grid_propagate(False)
+        band = ctk.CTkFrame(self, fg_color=p.rail, corner_radius=0)
+        band.grid(row=0, column=0, sticky="ew")
+        ctk.CTkFrame(band, fg_color=p.border, height=1, corner_radius=0).pack(
+            side="bottom", fill="x"
+        )
+        row = ctk.CTkFrame(band, fg_color="transparent")
+        row.pack(fill="x", padx=14, pady=(8, 0))
         logo_path = ASSETS / "MediaForge.png"
         if logo_path.exists():
-            image = ctk.CTkImage(Image.open(logo_path), size=(32, 31))
-            ctk.CTkLabel(rail, image=image, text="").pack(pady=(14, 18))
-        for name, (glyph, label) in VIEW_ICONS.items():
+            image = ctk.CTkImage(Image.open(logo_path), size=(22, 21))
+            ctk.CTkLabel(row, image=image, text="").pack(side="left", pady=(0, 8))
+        ctk.CTkLabel(row, text="MediaForge", font=font(14, "bold"), text_color=p.text).pack(
+            side="left", padx=(8, 18), pady=(0, 8)
+        )
+        self.kind_switch = ctk.CTkSegmentedButton(
+            row,
+            values=list(KINDS.values()),
+            command=self._kind_clicked,
+            fg_color=p.raised,
+            selected_color=p.accent,
+            selected_hover_color=p.accent_hover,
+            unselected_color=p.raised,
+            unselected_hover_color=p.border,
+            text_color=p.text,
+            font=font(12),
+            height=28,
+        )
+        self.kind_switch.set(KINDS["series"])
+        self.kind_switch.pack(side="left", padx=(0, 18), pady=(0, 8))
+        pages = ctk.CTkFrame(row, fg_color="transparent")
+        pages.pack(side="left")
+        for name, label in PAGES.items():
+            cell = ctk.CTkFrame(pages, fg_color="transparent")
+            cell.pack(side="left", padx=(0, 4))
+            line = ctk.CTkFrame(cell, fg_color="transparent")
+            line.pack()
             button = ctk.CTkButton(
-                rail,
-                text=glyph,
-                width=36,
-                height=36,
-                corner_radius=8,
+                line,
+                text=label,
+                width=70,
+                height=30,
+                corner_radius=6,
                 fg_color="transparent",
                 hover_color=p.raised,
                 text_color=p.muted,
-                font=font(17),
+                font=font(13),
                 command=lambda n=name: self.show_view(n),
             )
-            button.pack(pady=4)
-            self.rail_buttons[name] = button
-            _Tooltip(button, label, p)
+            button.pack(side="left")
+            if name == "queue":
+                self.inbox_badge = ctk.CTkLabel(
+                    line,
+                    text="",
+                    width=20,
+                    height=18,
+                    corner_radius=9,
+                    fg_color=p.error,
+                    text_color="#FFFFFF",
+                    font=font(10, "bold"),
+                )
+            mark = ctk.CTkFrame(cell, fg_color=p.rail, height=3, corner_radius=1)
+            mark.pack(fill="x", padx=10, pady=(2, 0))
+            self.page_buttons[name] = button
+            self.page_marks[name] = mark
+        self.status_label = ctk.CTkLabel(
+            row, text="Drop files here", font=font(11), text_color=p.muted
+        )
+        self.status_label.pack(side="right", pady=(0, 8))
+
+    def _kind_clicked(self, value: str) -> None:
+        self.set_kind("movies" if value.startswith(KINDS["movies"]) else "series")
+
+    def set_kind(self, kind: Kind) -> None:
+        """Show series or movies in every view that tells them apart."""
+        self.kind = kind
+        self._label_kinds()
+        for view in self.views.values():
+            set_kind = getattr(view, "set_kind", None)
+            if callable(set_kind):
+                set_kind(kind)
+
+    def set_counts(self, needs: int, other_kind: int) -> None:
+        """The Inbox's count of what needs the owner, and how many files the other side has."""
+        if needs > 0:
+            self.inbox_badge.configure(text=str(needs))
+            self.inbox_badge.pack(side="left", padx=(0, 2))
+        else:
+            self.inbox_badge.pack_forget()
+        self._other_kind = other_kind
+        self._label_kinds()
+
+    def _label_kinds(self) -> None:
+        labels = []
+        for kind, label in KINDS.items():
+            if kind != self.kind and self._other_kind:
+                label = f"{label} · {self._other_kind}"
+            labels.append(label)
+        self.kind_switch.configure(values=labels)
+        self.kind_switch.set(labels[list(KINDS).index(self.kind)])
 
     def _build_update_bar(self) -> None:
         """A thin bar above the Activity strip, shown only when an update is waiting."""
@@ -117,7 +195,7 @@ class MainShell(ctk.CTkFrame):
     def _show_update(self, text: str, button: str, command: Callable[[], None]) -> None:
         self.update_text.configure(text=text)
         self.update_badge.configure(text=button, command=command)
-        self.update_bar.grid(row=1, column=1, sticky="ew")
+        self.update_bar.grid(row=2, column=0, sticky="ew")
 
     def _placeholder(self, title: str) -> ctk.CTkFrame:
         frame = ctk.CTkFrame(self.content, fg_color=self.palette.main, corner_radius=0)
@@ -159,11 +237,11 @@ class MainShell(ctk.CTkFrame):
                 frame.grid(row=0, column=0, sticky="nsew")
             else:
                 frame.grid_remove()
-        for key, button in self.rail_buttons.items():
+        for key, button in self.page_buttons.items():
             active = key == name
-            button.configure(
-                fg_color=self.palette.raised if active else "transparent",
-                text_color=self.palette.accent if active else self.palette.muted,
+            button.configure(text_color=self.palette.text if active else self.palette.muted)
+            self.page_marks[key].configure(
+                fg_color=self.palette.accent if active else self.palette.rail
             )
         self.current_view = name
         on_show = getattr(self.views[name], "on_show", None)
@@ -315,38 +393,3 @@ class MainWindow(DnDCTk):
             return  # a Forge stops after its current file, an undo finishes; then it closes
         await save_window_state(self, self.services)
         self.destroy()
-
-
-class _Tooltip:
-    """A small label shown next to a rail button while the mouse is over it."""
-
-    def __init__(self, widget: ctk.CTkBaseClass, text: str, palette: Palette) -> None:
-        self._widget = widget
-        self._text = text
-        self._palette = palette
-        self._tip: ctk.CTkToplevel | None = None
-        widget.bind("<Enter>", self._show, add="+")
-        widget.bind("<Leave>", self._hide, add="+")
-
-    def _show(self, _event: Any = None) -> None:
-        if self._tip is not None:
-            return
-        x = self._widget.winfo_rootx() + self._widget.winfo_width() + 6
-        y = self._widget.winfo_rooty() + 6
-        tip = ctk.CTkToplevel(self._widget)
-        tip.overrideredirect(True)
-        tip.geometry(f"+{x}+{y}")
-        ctk.CTkLabel(
-            tip,
-            text=self._text,
-            fg_color=self._palette.raised,
-            text_color=self._palette.text,
-            corner_radius=6,
-            font=font(11),
-        ).pack(ipadx=6, ipady=2)
-        self._tip = tip
-
-    def _hide(self, _event: Any = None) -> None:
-        if self._tip is not None:
-            self._tip.destroy()
-            self._tip = None

@@ -129,6 +129,7 @@ class QueueView(ctk.CTkFrame):
         self.preset: Preset | None = None
         self.options = PresetOptions()
         self.running = False
+        self.kind = "series"
         self.busy = False  # set by @_one_at_a_time while Preview, Forge or Undo is going
         self._targets_in_run: dict[int, Path] = {}
         self._close_after_run: Callable[[], None] | None = None
@@ -352,6 +353,11 @@ class QueueView(ctk.CTkFrame):
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
         return task
+
+    def set_kind(self, kind: str) -> None:
+        """The Series | Movies switch (the Inbox shows one kind at a time)."""
+        self.kind = kind
+        self.refresh()
 
     def set_format(self, fmt: str) -> None:
         self.format_var.set(fmt)
