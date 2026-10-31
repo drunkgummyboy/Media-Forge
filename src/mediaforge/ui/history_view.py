@@ -135,7 +135,7 @@ class RunCard(ctk.CTkFrame):
             height=26,
             fg_color=p.accent,
             text_color=p.accent_text,
-            hover_color=p.warning,
+            hover_color=p.accent_hover,
             font=font(11, "bold"),
             command=lambda: view.spawn(view.undo_run(run.id)),
             state="disabled" if run.undoable_count == 0 else "normal",

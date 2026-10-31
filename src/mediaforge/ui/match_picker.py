@@ -143,7 +143,7 @@ class MatchPicker(ctk.CTkToplevel):
             width=84,
             fg_color=p.accent,
             text_color=p.accent_text,
-            hover_color=p.warning,
+            hover_color=p.accent_hover,
             command=lambda r=result: self._finish(r),
         ).grid(row=0, column=2, rowspan=2, padx=8)
         if result.poster_path and self.services.tmdb:

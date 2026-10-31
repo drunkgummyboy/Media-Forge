@@ -11,14 +11,14 @@ from mediaforge.core.queue import ItemStatus
 from mediaforge.models.media import MatchState, ResolvedMedia
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.queue_view import QueueView
-from mediaforge.ui.theme import STUDIO_DARK
+from mediaforge.ui.theme import DARK
 
 from helpers.tk import pump, pump_until
 
 
 @pytest_asyncio.fixture
 async def view(tk_root: DnDCTk, services: Services) -> AsyncIterator[QueueView]:
-    v = QueueView(tk_root, services, STUDIO_DARK)
+    v = QueueView(tk_root, services, DARK)
     v.pack(fill="both", expand=True)
     await pump(tk_root, 0.05)
     try:

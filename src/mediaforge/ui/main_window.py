@@ -108,7 +108,7 @@ class MainShell(ctk.CTkFrame):
             text="",
             height=26,
             fg_color=p.accent,
-            hover_color=p.warning,
+            hover_color=p.accent_hover,
             text_color=p.accent_text,
             font=font(12, "bold"),
         )

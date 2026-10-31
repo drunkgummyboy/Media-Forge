@@ -9,14 +9,14 @@ from mediaforge.app import Services, build_services, close_services, self_test
 from mediaforge.platform.paths import app_paths
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.main_window import MainShell, save_window_state
-from mediaforge.ui.theme import STUDIO_DARK, STUDIO_LIGHT, palette_for
+from mediaforge.ui.theme import DARK, LIGHT, palette_for
 
 from helpers.tk import pump
 
 
 @pytest_asyncio.fixture
 async def shell(tk_root: DnDCTk, services: Services) -> AsyncIterator[MainShell]:
-    s = MainShell(tk_root, services, STUDIO_DARK)
+    s = MainShell(tk_root, services, DARK)
     s.pack(fill="both", expand=True)
     await pump(tk_root, 0.1)
     try:
@@ -71,8 +71,8 @@ async def test_settings_preset_changes_reach_the_queue_dropdown(
 
 async def test_rail_highlight_follows_view(shell: MainShell) -> None:
     shell.show_view("history")
-    assert shell.rail_buttons["history"].cget("fg_color") == STUDIO_DARK.raised
-    assert shell.rail_buttons["history"].cget("text_color") == STUDIO_DARK.accent
+    assert shell.rail_buttons["history"].cget("fg_color") == DARK.raised
+    assert shell.rail_buttons["history"].cget("text_color") == DARK.accent
     assert shell.rail_buttons["queue"].cget("fg_color") == "transparent"
 
 
@@ -97,9 +97,9 @@ async def test_geometry_saved(tk_root: DnDCTk, services: Services) -> None:
 
 
 def test_palettes() -> None:
-    assert STUDIO_DARK.accent == "#f2a33a" and STUDIO_DARK.main == "#16181d"
-    assert palette_for("Light") is STUDIO_LIGHT
-    assert palette_for("Dark") is STUDIO_DARK
+    assert DARK.accent == "#4E6A85" and DARK.main == "#161616"  # AirGrabber's Slate
+    assert palette_for("Light") is LIGHT
+    assert palette_for("Dark") is DARK
 
 
 async def test_self_test_returns_zero(tk_root: DnDCTk) -> None:

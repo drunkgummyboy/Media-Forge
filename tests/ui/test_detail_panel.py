@@ -7,7 +7,7 @@ from PIL import Image
 from mediaforge.app import Services
 from mediaforge.ui.detail_panel import DetailPanel
 from mediaforge.ui.dnd_root import DnDCTk
-from mediaforge.ui.theme import STUDIO_DARK
+from mediaforge.ui.theme import DARK
 
 from helpers.tk import pump
 
@@ -17,7 +17,7 @@ async def test_clearing_poster_never_leaves_a_dead_image(
 ) -> None:
     # CTkLabel ignores image=None, so the inner Tk label kept pointing at a poster that was
     # then freed; the next update raised 'image "pyimage…" doesn't exist'.
-    panel = DetailPanel(tk_root, services, STUDIO_DARK, lambda item: None)
+    panel = DetailPanel(tk_root, services, DARK, lambda item: None)
     panel.pack()
     image = ctk.CTkImage(Image.new("RGB", (20, 30), "red"), size=(20, 30))
     panel._set_poster(image)  # pyright: ignore[reportPrivateUsage]
@@ -49,7 +49,7 @@ async def test_detail_panel_shows_names_and_episode(
             match_state=MatchState.CONFIDENT,
         )
     )
-    panel = DetailPanel(tk_root, services, STUDIO_DARK, lambda i: None)
+    panel = DetailPanel(tk_root, services, DARK, lambda i: None)
     panel.pack()
     target = tmp_path / "VisionQuest (2026)" / "VisionQuest (2026) - S01E02 - Theseus.mkv"
     panel.show(item, target)

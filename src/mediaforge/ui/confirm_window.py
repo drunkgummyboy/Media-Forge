@@ -132,7 +132,7 @@ class ConfirmWindow(ctk.CTkToplevel):
             border_width=0 if main else 1,
             border_color=p.border,
             text_color=p.accent_text if main else p.text,
-            hover_color=p.warning if main else p.raised,
+            hover_color=p.accent_hover if main else p.raised,
             font=font(12, "bold" if main else "normal"),
         )
 

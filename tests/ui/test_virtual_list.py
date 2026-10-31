@@ -5,7 +5,7 @@ import customtkinter as ctk
 import pytest_asyncio
 
 from mediaforge.ui.dnd_root import DnDCTk
-from mediaforge.ui.theme import STUDIO_DARK
+from mediaforge.ui.theme import DARK
 from mediaforge.ui.widgets.virtual_list import Row, VirtualList
 
 from helpers.tk import pump
@@ -35,7 +35,7 @@ async def vlist(tk_root: DnDCTk) -> AsyncIterator[VirtualList]:
     holder = ctk.CTkFrame(tk_root, width=700, height=500)
     holder.place(x=0, y=0)
     holder.pack_propagate(False)
-    v = VirtualList(holder, STUDIO_DARK)
+    v = VirtualList(holder, DARK)
     v.pack(fill="both", expand=True)
     await pump(tk_root, 0.05)
     try:

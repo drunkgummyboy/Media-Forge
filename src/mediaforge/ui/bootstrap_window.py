@@ -22,7 +22,7 @@ from mediaforge.platform.bootstrap import (
 )
 
 _ICON_FILE = Path(__file__).resolve().parent.parent / "assets" / "MediaForge.ico"
-# Copies of STUDIO_DARK tokens (ui/theme.py needs customtkinter).
+# Copies of DARK tokens (ui/theme.py needs customtkinter).
 _BG = "#16181d"
 _SURFACE = "#262a33"
 _ACCENT = "#f2a33a"

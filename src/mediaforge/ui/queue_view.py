@@ -295,7 +295,7 @@ class QueueView(ctk.CTkFrame):
             height=32,
             fg_color=p.accent,
             text_color=p.accent_text,
-            hover_color=p.warning,
+            hover_color=p.accent_hover,
             font=font(13, "bold"),
             command=lambda: self.spawn(self.forge()),
         )

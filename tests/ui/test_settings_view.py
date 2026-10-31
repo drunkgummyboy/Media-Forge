@@ -15,14 +15,14 @@ from mediaforge.platform import context_menu
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.first_start import FirstStart
 from mediaforge.ui.settings_view import SettingsView
-from mediaforge.ui.theme import STUDIO_DARK
+from mediaforge.ui.theme import DARK
 
 from helpers.tk import pump
 
 
 @pytest_asyncio.fixture
 async def view(tk_root: DnDCTk, services: Services) -> AsyncIterator[SettingsView]:
-    v = SettingsView(tk_root, services, STUDIO_DARK)
+    v = SettingsView(tk_root, services, DARK)
     v.pack(fill="both", expand=True)
     told: list[str] = []
     changed: list[int] = []
@@ -150,7 +150,7 @@ async def test_first_start_imports_legacy_and_marks_done(
         "presets": {"Legacy Only": {"type": "tv", "format": "{t}", "chk": ["chk_trailer"]}},
     }
     (old / "mediaforge_config.json").write_text(json.dumps(config), encoding="utf-8")
-    first = FirstStart(tk_root, services, STUDIO_DARK)
+    first = FirstStart(tk_root, services, DARK)
     await first.import_from(old / "mediaforge_config.json")
     await first.finish()
     assert [p.name for p in await services.presets.list()] == ["Legacy Only"]
@@ -163,7 +163,7 @@ async def test_first_start_imports_legacy_and_marks_done(
 async def test_edited_preset_is_highlighted(view: SettingsView) -> None:
     buttons = view.preset_list.winfo_children()
     assert view.editing == "Auto"
-    assert buttons[0].cget("text_color") == STUDIO_DARK.accent  # type: ignore[union-attr]
+    assert buttons[0].cget("text_color") == DARK.accent  # type: ignore[union-attr]
 
 
 async def test_settings_shows_version_and_offers_update(

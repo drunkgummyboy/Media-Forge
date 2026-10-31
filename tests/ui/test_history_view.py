@@ -13,7 +13,7 @@ from mediaforge.models.plan import PlanInput
 from mediaforge.models.preset import PresetOptions
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.history_view import HistoryView, when_label
-from mediaforge.ui.theme import STUDIO_DARK
+from mediaforge.ui.theme import DARK
 
 from helpers.tk import pump
 
@@ -48,7 +48,7 @@ async def forge(services: Services, root: Path, names: dict[str, str], preset: s
 
 @pytest_asyncio.fixture
 async def view(tk_root: DnDCTk, services: Services) -> AsyncIterator[HistoryView]:
-    v = HistoryView(tk_root, services, STUDIO_DARK)
+    v = HistoryView(tk_root, services, DARK)
     v.pack(fill="both", expand=True)
     asked: list[str] = []
     told: list[str] = []

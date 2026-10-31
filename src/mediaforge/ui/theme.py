@@ -1,4 +1,9 @@
-"""The Studio look: dark and calm with one warm accent, plus a light variant."""
+"""AirGrabber's family look: its colours, in light and dark, with its ten accent colours.
+
+Every view takes a `Palette`: one look (light or dark) of one accent, chosen when MediaForge starts
+(Settings → Looks; a change takes a restart, as in AirGrabber). The colours come from
+ui/palettes.py, a port of AirGrabber's, so the two programs look like one family.
+"""
 
 from __future__ import annotations
 
@@ -7,67 +12,90 @@ from pathlib import Path
 
 import customtkinter as ctk
 
+from mediaforge.ui import palettes
+
 FONT_FAMILY = "Segoe UI"
 MONO_FAMILY = "Consolas"
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
+ACCENTS: tuple[str, ...] = tuple(palettes.PALETTES)  # "slate" first
 
 
 @dataclass(frozen=True)
 class Palette:
-    name: str
-    main: str
-    rail: str
-    surface: str
-    raised: str
-    border: str
+    name: str  # "Dark" or "Light"
+    main: str  # window background
+    rail: str  # the top band
+    surface: str  # cards, inputs, bands
+    raised: str  # quiet buttons, chips, hover
+    border: str  # quiet 1 px lines
     text: str
     muted: str
-    accent: str
-    accent_text: str
+    accent: str  # primary buttons, chosen items
+    accent_text: str  # text on the accent
     success: str
     error: str
-    warning: str
+    warning: str  # amber: something needs a look
+    chip: str
+    selected: str  # the chosen part of a switch
+    link: str
+    accent_hover: str
+    edge: str  # outlined buttons
 
 
-STUDIO_DARK = Palette(
-    name="Dark",
-    main="#16181d",
-    rail="#111317",
-    surface="#1e2128",
-    raised="#262a33",
-    border="#2c303a",
-    text="#e8eaed",
-    muted="#8b93a1",
-    accent="#f2a33a",
-    accent_text="#16181d",
-    success="#4cc38a",
-    error="#e5534b",
-    warning="#f2a33a",
-)
-
-STUDIO_LIGHT = Palette(
-    name="Light",
-    main="#f6f7f9",
-    rail="#eceef2",
-    surface="#ffffff",
-    raised="#e9ebf0",
-    border="#d8dbe2",
-    text="#1b1f2a",
-    muted="#5c6473",
-    accent="#d9861c",
-    accent_text="#ffffff",
-    success="#2e9e6a",
-    error="#c9423a",
-    warning="#d9861c",
-)
+def accent_label(accent: str) -> str:
+    """The accent's name as Settings shows it ("Petrol")."""
+    palette = palettes.PALETTES.get(accent, palettes.PALETTES["slate"])
+    return palette.name
 
 
-def palette_for(theme: str) -> Palette:
-    """Dark or Light; "System" follows Windows' app mode."""
+def accent_swatch(accent: str) -> str:
+    return palettes.PALETTES.get(accent, palettes.PALETTES["slate"]).accent
+
+
+def _build(look: str, accent: str) -> Palette:
+    index = 1 if look == "Dark" else 0
+    tok = {**palettes.tokens(accent), **palettes.FIXED}
+
+    def c(name: str) -> str:
+        return palettes.to_hex(tok[name][index])
+
+    return Palette(
+        name=look,
+        main=c("BG"),
+        rail=c("TAB_BG"),
+        surface=c("SURFACE"),
+        raised=c("CHIP"),
+        border=c("PLACEHOLDER"),
+        text=c("TEXT"),
+        muted=c("TEXT_MUTED"),
+        accent=c("ACCENT"),
+        accent_text=c("ON_ACCENT"),
+        success=c("SUCCESS"),
+        error=c("DANGER"),
+        warning=c("WARNING"),
+        chip=c("CHIP"),
+        selected=c("SELECTED"),
+        link=c("LINK"),
+        accent_hover=c("ACCENT_HOVER"),
+        edge=c("EDGE"),
+    )
+
+
+DARK = _build("Dark", "slate")
+LIGHT = _build("Light", "slate")
+
+
+def palette_for(theme: str, accent: str = "slate") -> Palette:
+    """Dark or Light ("System" follows Windows' app mode) in `accent` (unknown: Slate)."""
     if theme == "System":
         ctk.set_appearance_mode("System")
         theme = ctk.get_appearance_mode()
-    return STUDIO_LIGHT if theme == "Light" else STUDIO_DARK
+    look = "Light" if theme == "Light" else "Dark"
+    if accent not in palettes.PALETTES:
+        accent = "slate"
+    if accent == "slate":
+        return LIGHT if look == "Light" else DARK
+    return _build(look, accent)
 
 
 def font(size: int = 12, weight: str = "normal", mono: bool = False) -> ctk.CTkFont:

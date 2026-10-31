@@ -133,7 +133,7 @@ class FirstStart(ctk.CTkToplevel):
             text="Add MediaForge to Explorer's right-click menu",
             variable=self.menu_var,
             fg_color=p.accent,
-            hover_color=p.warning,
+            hover_color=p.accent_hover,
             border_color=p.border,
             text_color=p.text,
             font=font(12),
@@ -145,7 +145,7 @@ class FirstStart(ctk.CTkToplevel):
             height=34,
             fg_color=p.accent,
             text_color=p.accent_text,
-            hover_color=p.warning,
+            hover_color=p.accent_hover,
             font=font(13, "bold"),
             command=lambda: asyncio.get_running_loop().create_task(self.finish()),
         ).pack(anchor="e", padx=24, pady=18)

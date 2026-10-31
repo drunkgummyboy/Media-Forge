@@ -10,7 +10,7 @@ from mediaforge.ui.confirm_window import ConfirmWindow
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.main_window import MainShell
 from mediaforge.ui.router import WindowRouter
-from mediaforge.ui.theme import STUDIO_DARK
+from mediaforge.ui.theme import DARK
 
 from helpers.tk import pump, pump_until
 
@@ -26,7 +26,7 @@ def make_files(folder: Path, names: Sequence[str]) -> list[Path]:
 async def open_window(
     tk_root: DnDCTk, services: Services, paths: list[Path], preset: str = "Movie (Flat)"
 ) -> ConfirmWindow:
-    win = ConfirmWindow(tk_root, services, STUDIO_DARK, paths, preset)
+    win = ConfirmWindow(tk_root, services, DARK, paths, preset)
     await win.loaded()
     await pump(tk_root, 0.2)
     return win
@@ -34,7 +34,7 @@ async def open_window(
 
 @pytest_asyncio.fixture
 async def shell(tk_root: DnDCTk, services: Services) -> AsyncIterator[MainShell]:
-    s = MainShell(tk_root, services, STUDIO_DARK)
+    s = MainShell(tk_root, services, DARK)
     s.pack(fill="both", expand=True)
     await pump(tk_root, 0.05)
     try:
@@ -106,7 +106,7 @@ async def test_open_in_main_moves_items_to_main_queue(
     tk_root: DnDCTk, services: Services, shell: MainShell, tmp_path: Path
 ) -> None:
     files = make_files(tmp_path / "m", ["Dune.2021.mkv", "Heat.1995.mkv"])
-    router = WindowRouter(tk_root, shell, services, STUDIO_DARK)
+    router = WindowRouter(tk_root, shell, services, DARK)
     router.open_confirm("Movie (Flat)", files)
     [win] = router.confirm_windows
     await win.loaded()
@@ -120,7 +120,7 @@ async def test_batcher_to_window_one_window_for_many_paths(
     tk_root: DnDCTk, services: Services, shell: MainShell, tmp_path: Path
 ) -> None:
     files = make_files(tmp_path / "m", [f"Movie.{n}.20{n:02d}.mkv" for n in range(12)])
-    router = WindowRouter(tk_root, shell, services, STUDIO_DARK)
+    router = WindowRouter(tk_root, shell, services, DARK)
     for f in files:
         router.handle(InstanceMessage(paths=[str(f)], preset="Movie (Flat)", confirm=True))
     router.flush(now=10**9)
@@ -134,7 +134,7 @@ async def test_plain_launch_message_raises_main_window_and_queues_paths(
     tk_root: DnDCTk, services: Services, shell: MainShell, tmp_path: Path
 ) -> None:
     files = make_files(tmp_path / "m", ["Dune.2021.mkv"])
-    router = WindowRouter(tk_root, shell, services, STUDIO_DARK)
+    router = WindowRouter(tk_root, shell, services, DARK)
     tk_root.withdraw()
     router.handle(InstanceMessage(paths=[str(files[0])], preset=None, confirm=False))
     await pump_until(tk_root, lambda: len(services.queue.items) == 1)
@@ -146,7 +146,7 @@ async def test_confirm_only_launch_exits_when_last_window_closes(
 ) -> None:
     files = make_files(tmp_path / "m", ["Dune.2021.mkv"])
     exits: list[int] = []
-    router = WindowRouter(tk_root, shell, services, STUDIO_DARK, confirm_only=True)
+    router = WindowRouter(tk_root, shell, services, DARK, confirm_only=True)
     router.quit = lambda: exits.append(1)
     router.open_confirm("Movie (Flat)", files)
     [win] = router.confirm_windows
