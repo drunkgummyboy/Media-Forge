@@ -16,6 +16,7 @@ class LaunchArgs(BaseModel):
     self_test: bool = False
     install_menu: bool = False  # install.ps1
     remove_menu: bool = False  # uninstall.ps1
+    tray: bool = False  # the Start-with-Windows shortcut: only the tray icon shows
 
 
 def parse_args(argv: Sequence[str]) -> LaunchArgs:
@@ -27,6 +28,7 @@ def parse_args(argv: Sequence[str]) -> LaunchArgs:
     parser.add_argument("--self-test", action="store_true")
     parser.add_argument("--install-menu", action="store_true")
     parser.add_argument("--remove-menu", action="store_true")
+    parser.add_argument("--tray", action="store_true")
     ns, _unknown = parser.parse_known_args(list(argv))
     return LaunchArgs(
         paths=[Path(p) for p in ns.paths],
@@ -35,4 +37,5 @@ def parse_args(argv: Sequence[str]) -> LaunchArgs:
         self_test=bool(ns.self_test),
         install_menu=bool(ns.install_menu),
         remove_menu=bool(ns.remove_menu),
+        tray=bool(ns.tray),
     )

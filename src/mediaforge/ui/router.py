@@ -48,6 +48,8 @@ class WindowRouter:
         self.root.after(FLUSH_MS, tick)
 
     def handle(self, msg: InstanceMessage) -> None:
+        if msg.tray and not msg.paths:
+            return  # a start in the tray (Windows startup) while this one already runs
         if msg.confirm:
             self._batcher.add(msg)
         else:

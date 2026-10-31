@@ -16,6 +16,7 @@ dependencies = [
     "pydantic>=2.14",
     "guessit>=4.4",
     "pillow>=13",
+    "pystray>=0.19",
 ]
 
 [project.optional-dependencies]

@@ -48,7 +48,7 @@ class LaunchHooks:
     run_app: Callable[[Any, Any], Any]  # returns app.RunOutcome
     apply_staged: Callable[[Path], str | None]
     ensure_uninstall_entry: Callable[[Path, str], None]
-    relaunch: Callable[[], None]
+    relaunch: Callable[[bool], None]  # True: start again in the tray
     self_test: Callable[[], int]
     menu: Callable[[bool], int] = lambda install: 0  # --install-menu / --remove-menu
     instance_running: Callable[[], bool] = lambda: False
@@ -105,11 +105,12 @@ def main(
             log.warning("No MediaForge window took the files and none could be opened")
             steps.report_unreachable(False)
             return 1
-    restart = False
+    restart = hidden = False
     crash: BaseException | None = None
     try:
         outcome = steps.run_app(args, primary)
         restart = bool(getattr(outcome, "restart", False))
+        hidden = bool(getattr(outcome, "hidden", False))
     except Exception as exc:
         crash = exc
     finally:
@@ -125,13 +126,15 @@ def main(
         steps.report_crash(crash)
         return 1
     if restart:
-        steps.relaunch()
+        steps.relaunch(hidden)
     return 0
 
 
 def _message(args: Any, message_type: Any) -> Any:
     paths = [str(p) for p in args.paths]
-    return message_type(paths=paths, preset=args.preset, confirm=args.confirm)
+    return message_type(
+        paths=paths, preset=args.preset, confirm=args.confirm, tray=getattr(args, "tray", False)
+    )
 
 
 def _hand_over_while_running(
@@ -214,13 +217,12 @@ def _show_error(text: str) -> None:
         pass
 
 
-def relaunch_command(install_dir: Path) -> list[str]:
+def relaunch_command(install_dir: Path, *, tray: bool = False) -> list[str]:
     exe = Path(sys.executable)
     pythonw = exe.with_name("pythonw.exe")
     runner = str(pythonw if pythonw.exists() else exe)
-    if LAUNCHER is not None:
-        return [runner, str(LAUNCHER)]
-    return [runner, "-m", "mediaforge"]
+    command = [runner, str(LAUNCHER)] if LAUNCHER is not None else [runner, "-m", "mediaforge"]
+    return [*command, "--tray"] if tray else command
 
 
 def default_hooks(install_dir: Path) -> LaunchHooks:
@@ -270,9 +272,10 @@ def default_hooks(install_dir: Path) -> LaunchHooks:
 
         ensure(folder, version)
 
-    def relaunch() -> None:
+    def relaunch(tray: bool) -> None:
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        subprocess.Popen(relaunch_command(install_dir), cwd=install_dir, creationflags=flags)
+        command = relaunch_command(install_dir, tray=tray)
+        subprocess.Popen(command, cwd=install_dir, creationflags=flags)
 
     def self_test() -> int:
         import asyncio

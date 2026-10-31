@@ -81,7 +81,7 @@ def hooks(
         run_app=run_app,
         apply_staged=apply_staged,
         ensure_uninstall_entry=lambda d, v: calls.append(f"entry {v}"),
-        relaunch=lambda: calls.append("relaunch"),
+        relaunch=lambda tray=False: calls.append("relaunch --tray" if tray else "relaunch"),
         self_test=lambda: 0,
         instance_running=lock_held,
         report_crash=lambda exc: calls.append(f"crash {exc}"),
@@ -346,3 +346,22 @@ def test_the_app_id_is_set_before_anything_else(install_dir: Path) -> None:
     steps.set_app_id = lambda: calls.append("app id")
     launch.main([], install_dir=install_dir, hooks=steps)
     assert calls[:2] == ["app id", "requirements"]
+
+
+def test_relaunch_into_the_tray_passes_tray(install_dir: Path) -> None:
+    calls: list[str] = []
+    steps = hooks(calls, restart=True)
+    steps.run_app = lambda args, p: SimpleNamespace(restart=True, hidden=True)
+    launch.main([], install_dir=install_dir, hooks=steps)
+    assert calls[-1] == "relaunch --tray"
+    assert launch.relaunch_command(install_dir, tray=True)[-1] == "--tray"
+    assert "--tray" not in launch.relaunch_command(install_dir)
+
+
+def test_tray_start_keeps_the_window_hidden() -> None:
+    from mediaforge.app import starts_hidden
+    from mediaforge.platform.cli import parse_args
+
+    assert starts_hidden(parse_args(["--tray"]))
+    assert starts_hidden(parse_args(["--confirm", "a.mkv"]))
+    assert not starts_hidden(parse_args([]))

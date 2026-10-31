@@ -24,8 +24,10 @@ class FakeUpdates:
         self.install_dir = Path("C:/Fake/MediaForge")
         self.staged: list[str] = []
         self.installed: list[str] = []
+        self.checks = 0
 
     async def check(self) -> UpdateInfo:
+        self.checks += 1
         if self.fail:
             raise UpdateError("Could not reach GitHub.")
         return UpdateInfo(

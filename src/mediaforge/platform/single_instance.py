@@ -30,6 +30,7 @@ class InstanceMessage(BaseModel):
     paths: list[str]
     preset: str | None
     confirm: bool
+    tray: bool = False  # a start in the tray: the running copy shows nothing
 
 
 def pipe_address(name: str | None = None) -> str:

@@ -20,3 +20,13 @@ def test_auto_run_means_confirm() -> None:
 
 def test_self_test_flag() -> None:
     assert parse_args(["--self-test"]).self_test is True
+
+
+def test_tray_args() -> None:
+    from mediaforge import launch
+    from mediaforge.platform.single_instance import InstanceMessage
+
+    assert parse_args(["--tray"]).tray and not parse_args([]).tray
+    # Handed to a MediaForge that already runs: it stays in the tray (nothing to show).
+    assert launch._message(parse_args(["--tray"]), InstanceMessage).tray  # pyright: ignore[reportPrivateUsage]
+    assert not launch._message(parse_args([]), InstanceMessage).tray  # pyright: ignore[reportPrivateUsage]

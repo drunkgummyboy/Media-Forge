@@ -325,3 +325,45 @@ async def test_the_watching_light_follows_the_status(tk_root: DnDCTk, shell: Mai
     await pump(tk_root, 0.05)
     assert shell.status_label.cget("text") == "Drop files here"
     assert not shell.watch_dot.winfo_ismapped()
+
+
+async def test_a_staged_update_restarts_into_the_tray_when_hidden(
+    tk_root: DnDCTk, shell: MainShell, services: Services
+) -> None:
+    from helpers.fake_updates import FakeUpdates
+
+    services.updates = FakeUpdates("9.9.9")  # type: ignore[assignment]
+    closed: list[int] = []
+    shell.on_close = lambda: closed.append(1)
+    tk_root.withdraw()  # MediaForge is in the tray
+    try:
+        await shell.check_for_update(delay_s=0)
+        await pump(tk_root, 0.05)
+    finally:
+        tk_root.deiconify()
+    assert shell.restart_requested and shell.restart_hidden and closed == [1]
+
+
+async def test_a_staged_update_waits_while_the_window_shows(
+    tk_root: DnDCTk, shell: MainShell, services: Services
+) -> None:
+    from helpers.fake_updates import FakeUpdates
+
+    services.updates = FakeUpdates("9.9.9")  # type: ignore[assignment]
+    shell.on_close = lambda: None
+    await shell.check_for_update(delay_s=0)
+    await pump(tk_root, 0.05)
+    assert not shell.restart_requested  # the owner chooses when (the Restart to update bar)
+
+
+async def test_the_update_check_repeats_daily(shell: MainShell, services: Services) -> None:
+    import asyncio
+
+    from helpers.fake_updates import FakeUpdates
+
+    fake = FakeUpdates("1.1.0")  # the same as this copy: nothing newer
+    services.updates = fake  # type: ignore[assignment]
+    task = asyncio.get_running_loop().create_task(shell.keep_checking_for_updates(0, 0.02))
+    await asyncio.sleep(0.15)
+    task.cancel()
+    assert fake.checks >= 3

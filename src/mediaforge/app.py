@@ -186,6 +186,12 @@ def _legacy_dirs() -> list[Path]:
 @dataclass(frozen=True)
 class RunOutcome:
     restart: bool = False  # the user chose "Restart to update" / "Update to …"
+    hidden: bool = False  # restart in the tray (an update installed while MediaForge was hidden)
+
+
+def starts_hidden(args: LaunchArgs) -> bool:
+    """Only the tray icon (Windows startup) or only the right-click confirm window shows."""
+    return args.tray or args.confirm
 
 
 def _log_unhandled(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
@@ -222,6 +228,7 @@ async def run(args: LaunchArgs, primary: Primary) -> RunOutcome:
     paths = app_paths()
     paths.ensure()
     services = await build_services(paths, _legacy_dirs())
+    tray = None
     try:
         ctk.set_appearance_mode(services.app_settings.theme)
         palette = start_palette(services.app_settings)
@@ -230,9 +237,11 @@ async def run(args: LaunchArgs, primary: Primary) -> RunOutcome:
         shell = window.shell
         router = WindowRouter(window, shell, services, palette, confirm_only=args.confirm)
         router.start()
-        if args.confirm:
-            window.withdraw()  # only the confirm window shows; closing it ends the app
-        else:
+        if not args.confirm:  # a right-click confirm window alone ends with that window
+            tray = _start_tray(window, router, services)
+        if starts_hidden(args):
+            window.withdraw()  # only the confirm window (closing it ends the app) or the tray
+        if not args.confirm:
             if not services.app_settings.first_start_done:
                 from mediaforge.ui.first_start import FirstStart
 
@@ -242,19 +251,57 @@ async def run(args: LaunchArgs, primary: Primary) -> RunOutcome:
             if args.paths:
                 shell.spawn(shell.add_paths(args.paths))
         inbox.attach(router.handle)
-        shell.spawn(shell.check_for_update())  # right-click-only launches update too
+        shell.spawn(shell.keep_checking_for_updates())  # right-click-only launches update too
         shell.spawn(shell.refresh_menu())  # follow this copy's location and new presets
         # customtkinter keeps a new window hidden on Windows until its own update() or
         # mainloop() runs, and the async loop calls neither (a withdrawn confirm-only window
-        # stays hidden).
+        # stays hidden, and so does one started in the tray).
         window.update()
         await main_loop(window)
-        return RunOutcome(restart=shell.restart_requested)
+        return RunOutcome(restart=shell.restart_requested, hidden=shell.restart_hidden)
     finally:
+        if tray is not None:
+            tray.stop()
         # The lock itself is released by the launcher, after a downloaded update is swapped in.
         primary.stop_listening()
         await close_services(services)
         gc_guard.stop()
+
+
+def _start_tray(window: Any, router: Any, services: Services) -> Any:
+    """The tray icon, and the automatic renamer reporting to it; None when pystray can't run."""
+    from PIL import Image
+
+    from mediaforge.ui.theme import ASSETS
+    from mediaforge.ui.tray import TrayIcon
+
+    shell, auto = window.shell, services.auto
+    tray: TrayIcon | None = None
+    try:
+        image: Image.Image = Image.open(ASSETS / "MediaForge.png").convert("RGBA")
+        image = image.resize((64, 64), Image.Resampling.LANCZOS)  # pyright: ignore[reportUnknownMemberType]
+        tray = TrayIcon(
+            asyncio.get_running_loop(),
+            image,
+            on_open=router.show_main,
+            on_check_now=auto.look_soon,
+            on_quit=lambda: shell.spawn(window.quit_app()),
+        )
+        tray.start()
+    except Exception as exc:  # pystray missing or not working: closing quits, as before
+        log.warning("No tray icon: %s", exc)
+        tray = None
+    window.tray = tray
+    auto.on_status = shell.set_watch_status
+    auto.on_needs = tray.set_count if tray is not None else (lambda count: None)
+    auto.notify = (
+        tray.notify if tray is not None else (lambda title, text: log.info("%s: %s", title, text))
+    )
+    if services.app_settings.automatic != "off":
+        auto.start()
+    else:
+        shell.set_watch_status(auto.status([]))
+    return tray
 
 
 async def menu_action(*, install: bool) -> int:

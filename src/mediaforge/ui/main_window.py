@@ -25,6 +25,7 @@ from mediaforge.platform.single_instance import InstanceMessage
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.log_strip import LogStrip
 from mediaforge.ui.theme import ASSETS, Palette, font
+from mediaforge.ui.tray import TrayIcon, close_action
 
 if TYPE_CHECKING:
     from mediaforge.app import Services
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
 log = logging.getLogger("mediaforge.ui")
 
 UPDATE_CHECK_DELAY_S = 10.0  # after start, so the update check never slows the window down
+UPDATE_INTERVAL_S = 24 * 3600  # and again every day
+TRAY_NOTICE = (
+    "It's in the tray next to the clock. Right-click its icon and choose Quit to close it."
+)
 
 PAGES: dict[str, str] = {"queue": "Inbox", "history": "History", "settings": "Settings"}
 KINDS: dict[str, str] = {"series": "Series", "movies": "Movies"}
@@ -52,6 +57,8 @@ class MainShell(ctk.CTkFrame):
         self._other_kind = 0
         self._tasks: set[asyncio.Task[Any]] = set()
         self.restart_requested = False
+        self.restart_hidden = False  # restart in the tray (an update while hidden)
+        self._staged: str | None = None  # the version waiting to be installed
         self.on_close: Callable[[], None] = lambda: None  # MainWindow: close the window
 
         self.grid_columnconfigure(0, weight=1)
@@ -310,14 +317,24 @@ class MainShell(ctk.CTkFrame):
         if not self.services.app_settings.auto_update:
             self._show_update(*offer, lambda: self.show_view("settings"))
             return
-        try:
-            version = await updates.stage()
-        except UpdateError as exc:
-            log.warning("Downloading the update failed: %s", exc)
-            if self.winfo_exists():  # Settings can still install it
-                self._show_update(*offer, lambda: self.show_view("settings"))
-            return
+        hidden = self.winfo_toplevel().state() == "withdrawn"
+        if self._staged == info.latest:
+            version = info.latest  # downloaded at an earlier check
+        else:
+            try:
+                version = await updates.stage()
+            except UpdateError as exc:
+                log.warning("Downloading the update failed: %s", exc)
+                if self.winfo_exists():  # Settings can still install it
+                    self._show_update(*offer, lambda: self.show_view("settings"))
+                return
+            self._staged = version
         if not self.winfo_exists():
+            return
+        if hidden:  # in the tray: restart into the tray now, so the update installs
+            log.info("Restarting into the tray to install MediaForge %s", version)
+            self.restart_hidden = True
+            self.request_restart()
             return
         self._show_update(
             f"MediaForge {version} is ready. It installs when you close MediaForge.",
@@ -325,6 +342,14 @@ class MainShell(ctk.CTkFrame):
             self.request_restart,
         )
         log.info("MediaForge %s is ready; it installs when you close MediaForge", version)
+
+    async def keep_checking_for_updates(
+        self, delay_s: float = UPDATE_CHECK_DELAY_S, interval_s: float = UPDATE_INTERVAL_S
+    ) -> None:
+        """Check after start, then every day: MediaForge may sit in the tray for weeks."""
+        while not self.restart_requested:
+            await self.check_for_update(delay_s)
+            await asyncio.sleep(interval_s)
 
     async def refresh_menu(self) -> None:
         """When the right-click menu is on, point it at this copy and the current presets."""
@@ -404,7 +429,8 @@ class MainWindow(DnDCTk):
         self.geometry(services.app_settings.window_geometry or "1200x800")
         self.shell = MainShell(self, services, palette)
         self.shell.pack(fill="both", expand=True)
-        self.shell.on_close = lambda: self.shell.spawn(self.close())
+        self.shell.on_close = lambda: self.shell.spawn(self.quit_app())
+        self.tray: TrayIcon | None = None  # set by app.run when the tray icon works
         self.drop_target_register(DND_FILES)  # pyright: ignore[reportUnknownMemberType]
         self.dnd_bind("<<Drop>>", self._on_drop)  # pyright: ignore[reportUnknownMemberType]
         self.protocol("WM_DELETE_WINDOW", async_handler(self.close))
@@ -416,7 +442,24 @@ class MainWindow(DnDCTk):
         return str(event.action)
 
     async def close(self) -> None:
-        if not self.shell.may_close(lambda: self.shell.spawn(self.close())):
+        """The window's close button: into the tray while watching, otherwise quit."""
+        running = self.tray is not None and self.tray.running
+        settings = self.services.app_settings
+        if close_action(automatic=settings.automatic, tray_running=running) == "quit":
+            await self.quit_app()
+            return
+        await save_window_state(self, self.services)
+        self.withdraw()
+        if not settings.tray_notice_shown and self.tray is not None:
+            self.tray.notify("MediaForge keeps watching", TRAY_NOTICE)
+            stored = await self.services.settings.load()
+            await self.services.settings.save(stored.model_copy(update={"tray_notice_shown": True}))
+            self.services.app_settings = settings.model_copy(update={"tray_notice_shown": True})
+
+    async def quit_app(self) -> None:
+        """Really close MediaForge (the tray's Quit, a restart to update, or close when not
+        watching)."""
+        if not self.shell.may_close(lambda: self.shell.spawn(self.quit_app())):
             return  # a Forge stops after its current file, an undo finishes; then it closes
         await save_window_state(self, self.services)
         self.destroy()
