@@ -43,6 +43,16 @@ def when_label(dt: datetime, now: datetime) -> str:
     return f"{dt.day} {dt:%b %Y %H:%M}"
 
 
+def day_label(dt: datetime, now: datetime) -> str:
+    """A day heading: "Today", "Yesterday", "Thu 29 Oct", "Tue 4 Mar 2025"."""
+    if dt.date() == now.date():
+        return "Today"
+    if dt.date() == (now - timedelta(days=1)).date():
+        return "Yesterday"
+    text = f"{dt:%a} {dt.day} {dt:%b}"
+    return text if dt.year == now.year else f"{text} {dt.year}"
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
@@ -77,9 +87,7 @@ def _not_undoable_reason(op: Operation) -> str | None:
 class RunCard(ctk.CTkFrame):
     def __init__(self, master: Any, view: HistoryView, run: RunSummary, undone_at: datetime | None):
         p = view.palette
-        super().__init__(
-            master, fg_color=p.surface, corner_radius=8, border_width=1, border_color=p.raised
-        )
+        super().__init__(master, fg_color=p.surface, corner_radius=8, border_width=0)
         self.view = view
         self.run = run
         self.undone_at = undone_at
@@ -93,12 +101,16 @@ class RunCard(ctk.CTkFrame):
         head = ctk.CTkFrame(self, fg_color="transparent")
         head.pack(fill="x", padx=12, pady=8)
         head.grid_columnconfigure(1, weight=1)
+        # A band, as in the Inbox: an accent stripe, the time large (the day is the heading).
+        ctk.CTkFrame(self, width=4, fg_color=p.muted if dim else p.accent, corner_radius=2).place(
+            x=3, rely=0.2, relheight=0.6
+        )
         ctk.CTkLabel(
             head,
-            text=when_label(run.started_at, datetime.now()),
-            width=130,
+            text=f"{run.started_at:%H:%M}",
+            width=70,
             anchor="w",
-            font=font(12),
+            font=font(15, "bold"),
             text_color=p.muted if dim else p.text,
         ).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
@@ -248,6 +260,8 @@ class HistoryView(ctk.CTkFrame):
         self.services = services
         self.palette = palette
         self.cards: list[RunCard] = []
+        self._headings: list[tuple[str, ctk.CTkLabel]] = []
+        self._card_days: list[str] = []
         self._generation = 0  # bumped by each reload; an older reload stops building
         self.busy = False  # an undo is going; further clicks are ignored
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -299,11 +313,16 @@ class HistoryView(ctk.CTkFrame):
             return
         for card in self.cards:
             card.destroy()
+        for _, heading in self._headings:
+            heading.destroy()
         self.cards = []
+        self._headings = []
+        self._card_days = []
         if not runs:
             self.empty_label.pack(pady=40)
             return
         self.empty_label.pack_forget()
+        now = datetime.now()
         for run in runs:
             undone_at = None
             if run.status == "undone":
@@ -312,10 +331,31 @@ class HistoryView(ctk.CTkFrame):
                 undone_at = max(dates) if dates else None
             if generation != self._generation:
                 return  # a newer reload took over
+            day = day_label(run.started_at, now)
+            if not self._headings or self._headings[-1][0] != day:
+                heading = ctk.CTkLabel(
+                    self.list,
+                    text=day.upper(),
+                    anchor="w",
+                    font=font(11, "bold"),
+                    text_color=self.palette.muted,
+                )
+                heading.pack(fill="x", padx=10, pady=(12, 2))
+                self._headings.append((day, heading))
             card = RunCard(self.list, self, run, undone_at)
             card.pack(fill="x", padx=6, pady=4)
             self.cards.append(card)
+            self._card_days.append(day)
             await asyncio.sleep(0)  # one card at a time, so the window keeps responding
+
+    def day_labels(self) -> list[str]:
+        return [day for day, _ in self._headings]
+
+    def cards_by_day(self) -> dict[str, list[RunCard]]:
+        out: dict[str, list[RunCard]] = {}
+        for card, day in zip(self.cards, self._card_days, strict=True):
+            out.setdefault(day, []).append(card)
+        return out
 
     def _card(self, run_id: int) -> RunCard | None:
         return next((c for c in self.cards if c.run.id == run_id), None)

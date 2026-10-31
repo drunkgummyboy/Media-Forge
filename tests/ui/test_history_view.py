@@ -202,3 +202,32 @@ async def test_reload_gives_the_window_turns_while_building_cards(
     await tick
     assert len(view.cards) == 50
     assert max(gaps) < 0.2
+
+
+def test_day_label_texts() -> None:
+    from mediaforge.ui.history_view import day_label
+
+    today = datetime(2026, 10, 31, 15, 0)
+    assert day_label(datetime(2026, 10, 31, 9, 5), today) == "Today"
+    assert day_label(datetime(2026, 10, 30, 23, 59), today) == "Yesterday"
+    assert day_label(datetime(2026, 10, 29, 8, 0), today) == "Thu 29 Oct"
+    assert day_label(datetime(2025, 3, 4, 8, 5), today) == "Tue 4 Mar 2025"
+
+
+async def test_runs_are_grouped_under_day_headings(
+    tk_root: DnDCTk, view: HistoryView, services: Services, tmp_path: Path
+) -> None:
+    from datetime import timedelta
+
+    older = await forge(services, tmp_path, {"a.mkv": "Alien"}, "Auto")
+    await forge(services, tmp_path, {"b.mkv": "Heat"}, "Auto")
+    await forge(services, tmp_path, {"c.mkv": "Ran"}, "Auto")
+    yesterday = (datetime.now() - timedelta(days=1)).timestamp()
+    await services.db.conn.execute(
+        "UPDATE runs SET started_at = ? WHERE id = ?", (yesterday, older)
+    )
+    await services.db.conn.commit()
+    await view.reload()
+    await pump(tk_root, 0.05)
+    assert view.day_labels() == ["Today", "Yesterday"]
+    assert [len(cards) for cards in view.cards_by_day().values()] == [2, 1]
