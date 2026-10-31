@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import tkinter as tk
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -45,7 +46,7 @@ class MainShell(ctk.CTkFrame):
         self.current_view: str = ""
         self.views: dict[str, ctk.CTkFrame] = {}
         self.page_buttons: dict[str, ctk.CTkButton] = {}
-        self.page_marks: dict[str, ctk.CTkFrame] = {}
+        self.page_marks: dict[str, tk.Frame] = {}
         self.kind: Kind = "series"
         self._other_kind = 0
         self._tasks: set[asyncio.Task[Any]] = set()
@@ -102,12 +103,13 @@ class MainShell(ctk.CTkFrame):
         )
         self.kind_switch.set(KINDS["series"])
         self.kind_switch.pack(side="left", padx=(0, 18), pady=(0, 8))
-        pages = ctk.CTkFrame(row, fg_color="transparent")
+        # Plain Tk frames: a CTkFrame asks for a default 200 px and spread the pages apart.
+        pages = tk.Frame(row, bg=p.rail)
         pages.pack(side="left")
         for name, label in PAGES.items():
-            cell = ctk.CTkFrame(pages, fg_color="transparent")
+            cell = tk.Frame(pages, bg=p.rail)
             cell.pack(side="left", padx=(0, 4))
-            line = ctk.CTkFrame(cell, fg_color="transparent")
+            line = tk.Frame(cell, bg=p.rail)
             line.pack()
             button = ctk.CTkButton(
                 line,
@@ -133,7 +135,7 @@ class MainShell(ctk.CTkFrame):
                     text_color="#FFFFFF",
                     font=font(10, "bold"),
                 )
-            mark = ctk.CTkFrame(cell, fg_color=p.rail, height=3, corner_radius=1)
+            mark = tk.Frame(cell, bg=p.rail, height=3)
             mark.pack(fill="x", padx=10, pady=(2, 0))
             self.page_buttons[name] = button
             self.page_marks[name] = mark
@@ -242,9 +244,7 @@ class MainShell(ctk.CTkFrame):
         for key, button in self.page_buttons.items():
             active = key == name
             button.configure(text_color=self.palette.text if active else self.palette.muted)
-            self.page_marks[key].configure(
-                fg_color=self.palette.accent if active else self.palette.rail
-            )
+            self.page_marks[key].configure(bg=self.palette.accent if active else self.palette.rail)
         self.current_view = name
         on_show = getattr(self.views[name], "on_show", None)
         if callable(on_show):

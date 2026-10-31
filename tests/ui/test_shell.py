@@ -75,8 +75,8 @@ async def test_band_shows_pages_and_marks_the_current(tk_root: DnDCTk, shell: Ma
     await pump(tk_root, 0.05)
     assert shell.page_buttons["history"].cget("text_color") == DARK.text
     assert shell.page_buttons["queue"].cget("text_color") == DARK.muted
-    assert shell.page_marks["history"].cget("fg_color") == DARK.accent
-    assert shell.page_marks["queue"].cget("fg_color") == DARK.rail
+    assert shell.page_marks["history"].cget("bg") == DARK.accent
+    assert shell.page_marks["queue"].cget("bg") == DARK.rail
 
 
 async def test_kind_switch_reaches_every_view(shell: MainShell) -> None:
@@ -256,3 +256,12 @@ async def test_restart_waits_for_an_undo_in_history(tk_root: DnDCTk, shell: Main
     history.busy = False  # type: ignore[attr-defined]
     await pump(tk_root, 0.6)
     assert closed == [1] and shell.restart_requested
+
+
+async def test_page_names_sit_close_together(tk_root: DnDCTk, shell: MainShell) -> None:
+    # Found in a real-window screenshot: layout boxes took a default width and spread the pages.
+    await pump(tk_root, 0.1)
+    buttons = list(shell.page_buttons.values())
+    for left, right in zip(buttons, buttons[1:], strict=False):
+        gap = right.winfo_rootx() - (left.winfo_rootx() + left.winfo_width())
+        assert gap < 40, gap
