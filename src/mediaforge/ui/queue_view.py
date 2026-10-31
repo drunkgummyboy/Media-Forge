@@ -748,8 +748,11 @@ class QueueView(ctk.CTkFrame):
             self.preview_line.configure(text="Add files to see how they'll be named.")
             return
         item = self.services.queue.get(self.list.selected or -1) or items[0]
-        rendered = render(self.fmt, item.media, item.path.suffix)
-        text = "↳ " + str(Path(item.root.name or str(item.root), *rendered.parts))
+        fmt, root = self.fmt, item.root
+        if item.watched is not None:  # a download goes to its library folder, with its preset
+            fmt, root = library_naming(item, self.services.app_settings, self.presets)
+        rendered = render(fmt, item.media, item.path.suffix)
+        text = "↳ " + str(Path(root.name or str(root), *rendered.parts))
         if rendered.unknown:
             text += "   ⚠ not a known code: " + ", ".join("{" + u + "}" for u in rendered.unknown)
         self.preview_line.configure(text=text)

@@ -664,3 +664,14 @@ async def test_forge_waits_for_an_automatic_run(
         lock.release()
     await task
     assert (tmp_path / "in" / "Heat (1995).mkv").exists()
+
+
+async def test_the_preview_line_shows_where_a_download_goes(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Found in the 1.3 real-window check: it showed the download folder and the window's preset.
+    downloads, _, _ = await library(view, tmp_path)
+    [item_id] = await watched(tk_root, view, downloads, "Dune.2021.mkv")
+    view.list.select(item_id)
+    await pump(tk_root, 0.05)
+    assert view.preview_line.cget("text").startswith("↳ Movies\Dune (2021)\Dune (2021).mkv")
