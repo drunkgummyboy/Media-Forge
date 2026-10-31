@@ -418,3 +418,14 @@ async def test_inbox_fits_the_minimum_window(
         assert view.title_label.cget("text") == "Inbox"
     finally:
         tk_root.geometry(old)
+
+
+async def test_episode_code_shows_whatever_the_naming_rule(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Found in a real-window screenshot: with "{ny}" (Auto) the lines lost their S17E03.
+    make_files(tmp_path / "in", ["Gold Rush S17E03 Diagnosing Rick 1080p AMZN WEB-DL.mkv"])
+    view.select_preset("Auto")
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    [line] = [r for r in view.list.rows if r.kind == "item"]
+    assert line.code == "S17E03"

@@ -160,6 +160,17 @@ def _seasons(group: Sequence[QueueItem]) -> str:
     return f"Seasons {numbers[0]}–{numbers[-1]}"
 
 
+def episode_code(item: QueueItem) -> str:
+    """S04E03 (or S01E02-E03), from the file itself rather than the naming rule."""
+    parsed = item.media.parsed
+    if parsed.season is None or parsed.episode is None:
+        return ""
+    code = f"S{parsed.season:02d}E{parsed.episode:02d}"
+    if parsed.episode_end is not None and parsed.episode_end != parsed.episode:
+        code += f"-E{parsed.episode_end:02d}"
+    return code
+
+
 def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRows:
     """The Inbox's rows for one kind ("series", "movies" or "all")."""
     out = InboxRows()
@@ -234,14 +245,13 @@ def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRo
             )
             for item in group:
                 name = rendered[item.id].parts[-1]
-                code = _SE.search(name) if episodes else None
                 title = item.media.episode_title if episodes and item.media.episode_title else name
                 out.rows.append(
                     Row(
                         key=item.id,
                         kind="item",
                         title=title,
-                        code=code.group(0) if code else "",
+                        code=episode_code(item) if episodes else "",
                         faint=item.parsed.source_name,
                         status=item.status.value,
                         badge=first.title,
