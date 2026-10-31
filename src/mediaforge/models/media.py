@@ -54,6 +54,7 @@ class ResolvedMedia(BaseModel, frozen=True):
     tmdb_id: int | None = None
     poster_path: str | None = None
     season_poster_path: str | None = None
+    backdrop_path: str | None = None
 
     @classmethod
     def offline(cls, parsed: ParsedMedia, state: MatchState = MatchState.OFFLINE) -> ResolvedMedia:

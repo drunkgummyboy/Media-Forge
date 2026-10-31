@@ -134,6 +134,7 @@ class Resolver:
             match_state=state,
             tmdb_id=chosen.id,
             poster_path=chosen.poster_path,
+            backdrop_path=chosen.backdrop_path,
             season_poster_path=season.poster_path if season else None,
         )
 

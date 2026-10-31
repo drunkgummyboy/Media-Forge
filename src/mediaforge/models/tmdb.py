@@ -18,6 +18,7 @@ class TmdbResult(BaseModel):
     date: str | None = None
     overview: str = ""
     poster_path: str | None = None
+    backdrop_path: str | None = None
     popularity: float = 0
 
     @model_validator(mode="before")

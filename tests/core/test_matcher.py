@@ -13,7 +13,12 @@ from mediaforge.models.tmdb import TmdbEpisode, TmdbResult, TmdbSeason
 
 def res(id_: int, title: str, date: str | None = None, original: str | None = None) -> TmdbResult:
     return TmdbResult(
-        id=id_, title=title, date=date, original_title=original, poster_path=f"/{id_}.jpg"
+        id=id_,
+        title=title,
+        date=date,
+        original_title=original,
+        poster_path=f"/{id_}.jpg",
+        backdrop_path=f"/b{id_}.jpg",
     )
 
 
@@ -217,3 +222,18 @@ async def test_apply_choice_skip_remembers_none(matches: MatchRepo) -> None:
     assert m.match_state is MatchState.SKIPPED
     stored = await matches.get(MediaKind.MOVIE, "dune", 2021)
     assert stored is not None and stored.tmdb_id is None
+
+
+async def test_backdrop_comes_with_the_match(matches: MatchRepo) -> None:
+    r = Resolver(FakeTmdb([res(7, "Dune", "2021-09-15")]), matches)
+    resolution = await r.resolve(movie("Dune", 2021))
+    assert resolution.media.backdrop_path == "/b7.jpg"
+
+
+async def test_remembered_match_keeps_its_backdrop(matches: MatchRepo) -> None:
+    r = Resolver(FakeTmdb(), matches)
+    chosen = res(42, "Heat", "1995-12-15")
+    media = await r.apply_choice(movie("Heat", 1995), chosen)
+    assert media.backdrop_path == "/b42.jpg"
+    again = await r.resolve(movie("Heat", 1995))  # through TMDB's details for the remembered id
+    assert again.media.backdrop_path == "/b42.jpg"
