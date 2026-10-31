@@ -11,7 +11,7 @@ from typing import Literal, Protocol, TypeVar, cast
 from pydantic import BaseModel
 
 from mediaforge.core import fsops
-from mediaforge.core.cleanup import find_cleanup_targets
+from mediaforge.core.cleanup import download_leftovers, find_cleanup_targets, videos_left
 from mediaforge.db.history import HistoryRepo
 from mediaforge.models.history import OpKind, RunSource
 from mediaforge.models.media import MediaKind
@@ -120,6 +120,7 @@ class Executor:
             if not result.cancelled:
                 await self._artwork(run_id, plan, result, succeeded)
                 await self._prune(run_id, plan, result)
+                await self._leftovers(run_id, plan, result, succeeded)
         finally:
             kept = await history.finish_run(run_id)
             result.run_id = run_id if kept else None
@@ -128,14 +129,38 @@ class Executor:
     async def _clean(self, run_id: int, plan: Plan, result: RunResult) -> None:
         for root in plan.clean_roots:
             for junk in await asyncio.to_thread(find_cleanup_targets, root):
-                op = await self._history.record_pending(run_id, OpKind.DELETE_FILE, junk, None)
+                await self._delete(run_id, junk, result)
+
+    async def _delete(self, run_id: int, junk: Path, result: RunResult) -> None:
+        op = await self._history.record_pending(run_id, OpKind.DELETE_FILE, junk, None)
+        try:
+            await self._journaled(op, lambda: fsops.remove_file(junk))
+        except OSError as exc:
+            log.warning("Couldn't remove %s: %s", junk, exc)
+            return
+        result.cleaned += 1
+        log.info("Removed junk: %s", junk)
+
+    async def _leftovers(self, run_id: int, plan: Plan, result: RunResult, ok: set[int]) -> None:
+        """Clear a download's folder once all its files moved out and no other video is left."""
+        for planned in plan.leftovers:
+            if not set(planned.item_ids) <= ok:
+                continue
+            if await asyncio.to_thread(videos_left, planned.folder):
+                continue
+            for junk in await asyncio.to_thread(download_leftovers, planned.folder):
+                await self._delete(run_id, junk, result)
+            folders = await asyncio.to_thread(fsops.walk, planned.folder)
+            for folder, _ in sorted(folders, key=lambda f: len(f[0].parts), reverse=True):
+                if not await asyncio.to_thread(fsops.is_empty_dir, folder):
+                    continue  # subtitles or pictures stay, and so does their folder
+                op = await self._history.record_pending(run_id, OpKind.REMOVE_DIR, folder, None)
                 try:
-                    await self._journaled(op, lambda j=junk: fsops.remove_file(j))
-                except OSError as exc:
-                    log.warning("Couldn't remove %s: %s", junk, exc)
+                    await self._journaled(op, lambda f=folder: _remove_dir_or_fail(f))
+                except OSError:
                     continue
-                result.cleaned += 1
-                log.info("Removed junk: %s", junk)
+                result.pruned += 1
+                log.info("Removed the download's folder: %s", folder)
 
     async def _files(
         self,

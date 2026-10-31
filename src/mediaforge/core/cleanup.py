@@ -1,4 +1,5 @@
-"""Find junk and leftover artwork under a dropped folder (the legacy cleanup rules)."""
+"""Find junk and leftover artwork under a dropped folder (the legacy cleanup rules), and what a
+download leaves behind once its video has moved into the library."""
 
 from __future__ import annotations
 
@@ -8,8 +9,11 @@ from pathlib import Path
 
 from mediaforge.core import fsops
 from mediaforge.core.parser import VIDEO_EXTENSIONS
+from mediaforge.core.watch import is_sample
 
 JUNK_NAMES = frozenset({"thumbs.db", ".ds_store", "desktop.ini"})
+# Notes a release ships beside its video; subtitles and pictures are not among them.
+DOWNLOAD_NOTES = frozenset({".nfo", ".txt", ".url", ".sfv"})
 
 _POSTER = re.compile(r"^(?P<base>.+) - poster\.jpg$")
 _SERIES_POSTER = re.compile(r"^.+ - series poster\.jpg$")
@@ -51,3 +55,27 @@ def find_cleanup_targets(root: Path) -> list[Path]:
                 if not has_video_named(m.group("base")):
                     targets.append(path)
     return targets
+
+
+def download_leftovers(folder: Path) -> list[Path]:
+    """Samples, release notes and junk in a download's folder (blocking: run it in a thread)."""
+    found: list[Path] = []
+    for dirpath, files in fsops.walk(folder):
+        for name in sorted(files):
+            path = Path(dirpath) / name
+            low = name.lower()
+            video = _is_video_name(name)
+            if (video and is_sample(path)) or low in JUNK_NAMES:
+                found.append(path)
+            elif not video and os.path.splitext(low)[1] in DOWNLOAD_NOTES:
+                found.append(path)
+    return found
+
+
+def videos_left(folder: Path) -> bool:
+    """Whether a real video (not a sample) is still somewhere in `folder`."""
+    return any(
+        _is_video_name(f) and not is_sample(Path(f))
+        for _, files in fsops.walk(folder)
+        for f in files
+    )

@@ -279,3 +279,53 @@ async def test_cancelled_task_still_journals_the_rename(
     [summary] = await history.list_runs()
     ops = await history.operations(summary.id)
     assert [(o.kind, o.state) for o in ops] == [(OpKind.RENAME, OpState.DONE)]
+
+
+# --- a download's leftovers (1.3) ---------------------------------------------------------------
+
+
+def download(tmp_path: Path, extra: tuple[str, ...] = ()) -> tuple[Plan, Path]:
+    """One movie in a release folder with junk beside it, planned into a library folder."""
+    from mediaforge.models.plan import PlannedLeftovers
+
+    release = tmp_path / "dl" / "Heat.1995.1080p-GRP"
+    for name in ("Sample/heat-sample.mkv", "heat.nfo", "RARBG.txt", *extra):
+        (release / name).parent.mkdir(parents=True, exist_ok=True)
+        (release / name).write_bytes(b"x")
+    [item] = make_inputs(release, {"heat.1995.mkv": "Heat"})
+    item = item.model_copy(update={"root": tmp_path / "lib", "dropped_folder": None})
+    plan = build_plan([item], "{ny}/{ny}", PresetOptions())
+    plan = plan.model_copy(update={"leftovers": (PlannedLeftovers(folder=release, item_ids=(1,)),)})
+    return plan, release
+
+
+async def test_leftovers_go_after_a_successful_move(tmp_path: Path, history: HistoryRepo) -> None:
+    plan, release = download(tmp_path)
+    result = await run(history, plan)
+    assert result.renamed == 1
+    assert not release.exists()  # junk removed, then the emptied release folder
+    assert (tmp_path / "dl").exists()  # never above the release folder
+    ops = await history.operations(result.run_id or 0)
+    kinds = [o.kind for o in ops]
+    assert kinds.count(OpKind.DELETE_FILE) == 3
+    assert OpKind.REMOVE_DIR in kinds
+    assert all(o.state is OpState.DONE for o in ops)
+
+
+async def test_leftovers_stay_when_a_move_failed(tmp_path: Path, history: HistoryRepo) -> None:
+    plan, release = download(tmp_path)
+    target = plan.files[0].target
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"something already here")  # the move fails: the name is taken
+    result = await run(history, plan)
+    assert result.failed == 1
+    assert (release / "heat.nfo").exists() and (release / "heat.1995.mkv").exists()
+
+
+async def test_leftovers_stay_when_another_video_is_left(
+    tmp_path: Path, history: HistoryRepo
+) -> None:
+    plan, release = download(tmp_path, extra=("heat.extras.mkv",))
+    result = await run(history, plan)
+    assert result.renamed == 1
+    assert (release / "heat.nfo").exists() and (release / "heat.extras.mkv").exists()

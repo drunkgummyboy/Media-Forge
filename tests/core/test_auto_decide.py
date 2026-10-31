@@ -158,3 +158,27 @@ def test_a_target_outside_the_library_is_refused() -> None:
     stray.watched = Path(r"C:\elsewhere")  # not where the file is
     with pytest.raises(ValueError, match="outside"):
         library_runs([stray], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+
+
+def test_a_moved_files_release_folder_is_planned_for_clean_up() -> None:
+    [run] = library_runs([episode()], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+    [leftovers] = run.plan.leftovers
+    assert leftovers.folder == DOWNLOADS / "VisionQuest.S01E02" and leftovers.item_ids == (1,)
+
+
+def test_the_watched_folder_itself_is_never_removed() -> None:
+    [run] = library_runs([movie()], SETTINGS, DEFAULT_PRESETS, lambda p: False)  # loose in it
+    assert run.plan.leftovers == ()
+
+
+def test_no_leftover_plan_when_clean_downloads_is_off() -> None:
+    off = SETTINGS.model_copy(update={"clean_downloads": False})
+    [run] = library_runs([episode()], off, DEFAULT_PRESETS, lambda p: False)
+    assert run.plan.leftovers == ()
+
+
+def test_a_held_file_keeps_its_folder() -> None:
+    taken = SERIES / "VisionQuest (2025)" / "VisionQuest (2025) - Season 01"
+    target = taken / "VisionQuest (2025) - S01E02 - Theseus.mkv"
+    [run] = library_runs([episode()], SETTINGS, DEFAULT_PRESETS, lambda p: p == target)
+    assert run.plan.leftovers == ()

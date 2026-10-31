@@ -21,7 +21,7 @@ from mediaforge.core.planner import build_plan
 from mediaforge.core.queue import QueueItem
 from mediaforge.db.settings import AppSettings
 from mediaforge.models.media import MatchState, MediaKind
-from mediaforge.models.plan import Plan, PlanInput
+from mediaforge.models.plan import Plan, PlanInput, PlannedLeftovers
 from mediaforge.models.preset import DEFAULT_PRESETS, Preset
 
 ALREADY_THERE = "Already in the library."
@@ -81,6 +81,29 @@ def _same(a: Path, b: Path) -> bool:
     return os.path.normcase(str(a)) == os.path.normcase(str(b))
 
 
+def _leftovers(
+    items: Sequence[QueueItem], plan: Plan, held: dict[int, str]
+) -> tuple[PlannedLeftovers, ...]:
+    """The download folders to clear after the move: below (never equal to) the watched folder,
+    and only those every file of which is moving now."""
+    moving = {f.item_id for f in plan.files}
+    folders: dict[str, tuple[Path, list[int]]] = {}
+    kept: set[str] = set()
+    for item in items:
+        folder = item.path.parent
+        key = os.path.normcase(str(folder))
+        if item.id not in moving or item.id in held:
+            kept.add(key)
+        elif item.watched is not None and inside(folder, item.watched):
+            if not _same(folder, item.watched):
+                folders.setdefault(key, (folder, []))[1].append(item.id)
+    return tuple(
+        PlannedLeftovers(folder=folder, item_ids=tuple(ids))
+        for key, (folder, ids) in folders.items()
+        if key not in kept
+    )
+
+
 def _runs(
     items: Sequence[QueueItem],
     settings: AppSettings,
@@ -120,6 +143,8 @@ def _runs(
             plan = plan.model_copy(
                 update={"files": tuple(f for f in plan.files if f.item_id not in held)}
             )
+        if settings.clean_downloads:
+            plan = plan.model_copy(update={"leftovers": _leftovers(mine, plan, held)})
         for planned in plan.files:
             if not inside(planned.target, library):
                 raise ValueError(f"{planned.target} is outside the {kind.value} library folder")

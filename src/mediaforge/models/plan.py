@@ -41,10 +41,18 @@ class PlannedTrailer(BaseModel, frozen=True):
     item_ids: tuple[int, ...] = ()
 
 
+class PlannedLeftovers(BaseModel, frozen=True):
+    """A download's folder to clear once all of these files have moved out of it."""
+
+    folder: Path
+    item_ids: tuple[int, ...] = ()
+
+
 class Plan(BaseModel, frozen=True):
     files: tuple[PlannedFile, ...]
     posters: tuple[PlannedPoster, ...] = ()
     trailers: tuple[PlannedTrailer, ...] = ()
     clean_roots: tuple[Path, ...] = ()
     prune_dirs: tuple[Path, ...] = ()
+    leftovers: tuple[PlannedLeftovers, ...] = ()
     options: PresetOptions = PresetOptions()

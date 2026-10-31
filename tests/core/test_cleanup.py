@@ -56,3 +56,21 @@ def test_ordinary_files_untouched(tmp_path: Path) -> None:
     touch(tmp_path / "notes.txt")
     touch(tmp_path / "movie.mkv")
     assert find_cleanup_targets(tmp_path) == []
+
+
+def test_download_leftovers_are_samples_and_notes_only(tmp_path: Path) -> None:
+    from mediaforge.core.cleanup import download_leftovers
+
+    release = tmp_path / "Show.S01E01.1080p-GRP"
+    junk = {
+        touch(release / "Sample" / "show.s01e01-sample.mkv"),
+        touch(release / "show.nfo"),
+        touch(release / "RARBG.txt"),
+        touch(release / "Visit.url"),
+        touch(release / "show.sfv"),
+        touch(release / "Thumbs.db"),
+    }
+    touch(release / "show.s01e01.en.srt")  # subtitles stay
+    touch(release / "Screens" / "shot1.jpg")  # pictures stay
+    touch(release / "show.s01e01.mkv")  # the video itself is never a leftover
+    assert set(download_leftovers(release)) == junk
