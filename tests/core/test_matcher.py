@@ -7,7 +7,7 @@ from mediaforge.api.tmdb import TmdbError
 from mediaforge.core.matcher import Resolver, choose, match_key, normalize_title
 from mediaforge.db.database import Database
 from mediaforge.db.matches import MatchRepo, RememberedMatch
-from mediaforge.models.media import MatchState, MediaKind, ParsedMedia
+from mediaforge.models.media import MatchState, MediaKind, ParsedMedia, ResolvedMedia
 from mediaforge.models.tmdb import TmdbEpisode, TmdbResult, TmdbSeason
 
 
@@ -237,3 +237,18 @@ async def test_remembered_match_keeps_its_backdrop(matches: MatchRepo) -> None:
     assert media.backdrop_path == "/b42.jpg"
     again = await r.resolve(movie("Heat", 1995))  # through TMDB's details for the remembered id
     assert again.media.backdrop_path == "/b42.jpg"
+
+
+async def test_a_match_records_the_original_title_and_whether_tmdb_knows_the_episode(
+    matches: MatchRepo,
+) -> None:
+    # Renaming on its own (1.3) checks both before moving a file by itself.
+    tmdb = FakeTmdb([res(7, "Money Heist", "2017-05-02", original="La Casa de Papel")])
+    found = (await Resolver(tmdb, matches).resolve(episode("La Casa de Papel"))).media
+    assert found.original_title == "La Casa de Papel"
+    assert found.episode_known  # the fake season has episode 2
+    parsed = episode().model_copy(update={"episode": 9, "episode_title": "From The Name"})
+    missing = (await Resolver(tmdb, matches).resolve(parsed)).media
+    assert not missing.episode_known
+    assert missing.episode_title == "From The Name"  # the name's own title is kept, as before
+    assert not ResolvedMedia.offline(parsed).episode_known

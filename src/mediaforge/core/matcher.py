@@ -121,10 +121,12 @@ class Resolver:
         parsed: ParsedMedia, chosen: TmdbResult, state: MatchState, season: TmdbSeason | None
     ) -> ResolvedMedia:
         episode_title = parsed.episode_title
+        known = False
         if season is not None and parsed.episode is not None:
             for ep in season.episodes:
                 if ep.episode_number == parsed.episode and ep.name:
                     episode_title = ep.name
+                    known = True
                     break
         return ResolvedMedia(
             parsed=parsed,
@@ -136,6 +138,8 @@ class Resolver:
             poster_path=chosen.poster_path,
             backdrop_path=chosen.backdrop_path,
             season_poster_path=season.poster_path if season else None,
+            original_title=chosen.original_title,
+            episode_known=known,
         )
 
     async def _build(

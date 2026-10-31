@@ -55,6 +55,8 @@ class ResolvedMedia(BaseModel, frozen=True):
     poster_path: str | None = None
     season_poster_path: str | None = None
     backdrop_path: str | None = None
+    original_title: str | None = None  # TMDB's title in the original language
+    episode_known: bool = False  # TMDB's season lists this episode (its name came from TMDB)
 
     @classmethod
     def offline(cls, parsed: ParsedMedia, state: MatchState = MatchState.OFFLINE) -> ResolvedMedia:
