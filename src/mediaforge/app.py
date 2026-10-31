@@ -18,6 +18,7 @@ from mediaforge import launch
 from mediaforge.api.tmdb import TmdbClient, TmdbError
 from mediaforge.api.trailers import TrailerService
 from mediaforge.api.updates import UpdateService
+from mediaforge.core.auto import AutoRenamer
 from mediaforge.core.executor import Executor
 from mediaforge.core.formatter import render
 from mediaforge.core.matcher import Resolver
@@ -94,6 +95,8 @@ class Services:
     queue_events: EventHub
     updates: UpdateService
     tmdb_ref: TmdbRef = field(default_factory=TmdbRef)
+    run_lock: asyncio.Lock = field(default_factory=asyncio.Lock)  # one rename run at a time
+    auto: AutoRenamer = field(init=False)  # renaming on its own (started by `run`)
 
     @property
     def tmdb(self) -> TmdbClient | None:
@@ -134,7 +137,7 @@ async def build_services(paths: AppPaths, legacy_dirs: Sequence[Path]) -> Servic
     resolver = Resolver(ref.client, matches)
     hub = EventHub()
     trailers = TrailerService(paths.tools_dir, session, settings)
-    return Services(
+    services = Services(
         paths=paths,
         db=db,
         settings=settings,
@@ -154,6 +157,8 @@ async def build_services(paths: AppPaths, legacy_dirs: Sequence[Path]) -> Servic
         updates=UpdateService(session),
         tmdb_ref=ref,
     )
+    services.auto = AutoRenamer(services)
+    return services
 
 
 async def rebuild_tmdb(services: Services) -> None:
@@ -166,6 +171,7 @@ async def rebuild_tmdb(services: Services) -> None:
 
 
 async def close_services(services: Services) -> None:
+    await services.auto.stop()
     services.queue_events.listeners.clear()
     services.queue.clear()
     await services.session.close()
