@@ -674,4 +674,5 @@ async def test_the_preview_line_shows_where_a_download_goes(
     [item_id] = await watched(tk_root, view, downloads, "Dune.2021.mkv")
     view.list.select(item_id)
     await pump(tk_root, 0.05)
-    assert view.preview_line.cget("text").startswith("↳ Movies\Dune (2021)\Dune (2021).mkv")
+    expected = "↳ " + str(Path("Movies", "Dune (2021)", "Dune (2021).mkv"))
+    assert view.preview_line.cget("text").startswith(expected)

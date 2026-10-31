@@ -9,6 +9,25 @@ AirGrabber's look: light or dark, ten accent colours, shows and movies in bands.
 every new name before anything changes, and you can undo any of your last 50 runs, whole or file by
 file.
 
+## Renaming on its own
+
+MediaForge can also watch your download folder (AirGrabber's, for example) and handle new
+downloads by itself:
+
+- Choose the folders in **Settings › Library**: the download folder(s) to watch, your **Series**
+  library folder and your **Movies** library folder, and the naming preset each uses.
+- Switch **Rename on its own** to **Trial** first: MediaForge then only shows, under "Would rename"
+  in the Inbox, what it would do. Switch to **On** when you're happy.
+- A download is only touched once it has really finished. When MediaForge is sure what it is, the
+  file is renamed and moved into the right library folder, with its posters, and shows up in
+  History (undo works as always). When it isn't sure, or the same episode is already in your
+  library, the file waits under "Needs you" with the reason: one click on **Rename** or
+  **Choose…** settles it.
+- Closing the window keeps MediaForge in the tray, next to the clock; right-click its icon and choose
+  **Quit** to close it completely. **Start with Windows** (Settings › Library) starts it there.
+- It tells you when files need you, and sends a short summary in the evening; both can be
+  switched off.
+
 ## Install
 
 On Windows 10 or 11:

@@ -69,6 +69,22 @@ Design (from the owner's blueprint): async, modular, strongly typed.
   `"queue"`) draws show and movie bands on the fast canvas list (`widgets/virtual_list.py`),
   pictures from `ui/images.py`. History groups run bands by day; Settings is in tabs.
 
+## Renaming on its own (1.3)
+
+- `core/watch.py` lists the watched folders (in a thread) and decides when a download has finished
+  (unchanged at two looks, untouched for 10 minutes, not held open); `core/library.py` checks the
+  folders; `core/auto.py` decides sure-or-not (`decide`), plans the move into the Series/Movies
+  library folder (`library_runs`; a taken name waits, never a "(1)" copy) and runs the
+  `AutoRenamer` (a look every 5 minutes, Trial/On, retries, notifications, evening summary).
+- Watched downloads live in the same `Queue` as dropped files (`QueueItem.watched`, status
+  `HELD` with a reason). Renames go through the `Executor` as always, with the run source
+  "automatic"; `Services.run_lock` keeps one run at a time between the Inbox and the renamer.
+- `ui/tray.py` is the pystray tray icon on its own daemon thread: the second exception to "no
+  threads". Its callbacks only post to the loop with `call_soon_threadsafe`.
+  `platform/startup.py` writes the Startup shortcut (`--tray`); `uninstall.ps1` removes it.
+- Settings › Library is `ui/library_tab.py`. Every folder is a setting; nothing is watched until
+  the owner sets it up.
+
 ## Things learned the hard way
 
 - Tk on Windows: never mark a pop-up `transient()` (it crashed Tk once destroyed
