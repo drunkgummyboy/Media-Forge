@@ -34,6 +34,7 @@ log = logging.getLogger("mediaforge.ui")
 
 LANGUAGES = ["en-US", "en-GB", "nl-NL", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "sv-SE"]
 TMDB_KEY_PAGE = "https://www.themoviedb.org/settings/api"
+DONATE_PAGE = "https://ko-fi.com/airgrabber"  # shared with AirGrabber
 _TYPE_LABELS = {TypeHint.AUTO: "Auto", TypeHint.MOVIE: "Movie", TypeHint.TV: "TV"}
 
 _SAMPLE_EPISODE = ResolvedMedia(
@@ -725,6 +726,19 @@ class SettingsView(ctk.CTkFrame):
             lambda: os.startfile(paths.logs_dir),  # type: ignore[attr-defined]
             width=130,
         ).pack(anchor="w", pady=(8, 0))
+        ctk.CTkLabel(
+            box,
+            text="MediaForge is free. If it saves you time, you can buy me a coffee.",
+            font=font(11),
+            text_color=p.muted,
+        ).pack(anchor="w", pady=(12, 0))
+        self.donate_button = self._button(
+            box,
+            "♥ Support MediaForge",
+            lambda: os.startfile(DONATE_PAGE),  # type: ignore[attr-defined]
+            width=170,
+        )
+        self.donate_button.pack(anchor="w", pady=(4, 0))
         self.show_version()
 
     def show_version(self) -> None:

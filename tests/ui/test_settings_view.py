@@ -235,3 +235,15 @@ async def test_accent_is_saved_and_used_next_start(view: SettingsView, services:
     assert start_palette(saved.model_copy(update={"theme": "Dark"})).accent == "#2E7A76"
     assert view.accent_buttons["teal"].cget("text") == "✓"
     assert view.accent_buttons["slate"].cget("text") == ""
+
+
+async def test_about_has_a_support_link(
+    view: SettingsView, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mediaforge.ui import settings_view
+
+    opened: list[str] = []
+    monkeypatch.setattr(settings_view.os, "startfile", opened.append, raising=False)
+    assert view.donate_button.cget("text") == "♥ Support MediaForge"
+    view.donate_button.invoke()
+    assert opened == ["https://ko-fi.com/airgrabber"]

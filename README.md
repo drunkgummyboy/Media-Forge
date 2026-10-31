@@ -66,6 +66,11 @@ Python environment; your settings and history are kept.
 `MediaForge.py` (and the older `MediaForge_v0_4.py` / `MediaForge_v0_5.py`) is the old single-file
 version. It stays here as the reference the new version was built from.
 
+## Support
+
+MediaForge is free. If it saves you time, you can buy me a coffee on
+[Ko-fi](https://ko-fi.com/airgrabber). Thank you!
+
 ## Development
 
 ```powershell
