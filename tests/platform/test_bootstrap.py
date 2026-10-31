@@ -37,6 +37,7 @@ def test_reads_dependencies_from_pyproject() -> None:
         "pydantic",
         "guessit",
         "pillow",
+        "pystray",  # the tray icon (1.3): installed by the launcher on the next start
     ]
     assert requirements(PYPROJECT)[0].clauses == ((">=", "6.0"),)
 
