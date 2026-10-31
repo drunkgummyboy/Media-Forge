@@ -215,3 +215,23 @@ async def test_all_ticked_saves_empty_list(
     monkeypatch.setattr(context_menu, "legacy_installed", lambda: False)
     await view.install_menu([p.name for p in await services.presets.list()])
     assert (await services.settings.load()).context_menu_presets == []
+
+
+async def test_settings_has_its_tabs(view: SettingsView) -> None:
+    assert view.tab_names == ["Naming", "TMDB", "Right-click menu", "Looks", "About"]
+    assert view.tabs.get() == "Naming"
+    # Each section lives in its tab, under the same names as before.
+    assert view.theme.winfo_toplevel() is view.winfo_toplevel()
+
+
+async def test_accent_is_saved_and_used_next_start(view: SettingsView, services: Services) -> None:
+    from mediaforge.app import start_palette
+
+    assert services.app_settings.accent == "slate"
+    assert set(view.accent_buttons) >= {"slate", "teal", "graphite"}
+    await view.set_accent("teal")
+    saved = await services.settings.load()
+    assert saved.accent == "teal" and services.app_settings.accent == "teal"
+    assert start_palette(saved.model_copy(update={"theme": "Dark"})).accent == "#2E7A76"
+    assert view.accent_buttons["teal"].cget("text") == "✓"
+    assert view.accent_buttons["slate"].cget("text") == ""

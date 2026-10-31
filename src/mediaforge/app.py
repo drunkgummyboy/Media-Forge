@@ -187,11 +187,17 @@ def _log_unhandled(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> 
     log.error("Something went wrong: %s", exc or context.get("message"), exc_info=exc)
 
 
+def start_palette(settings: AppSettings) -> Any:
+    """The look this run uses: light, dark or Windows' choice, in the chosen accent colour."""
+    from mediaforge.ui.theme import palette_for
+
+    return palette_for(settings.theme, settings.accent)
+
+
 async def run(args: LaunchArgs, primary: Primary) -> RunOutcome:
     from mediaforge.ui import gc_guard
     from mediaforge.ui.main_window import MainWindow
     from mediaforge.ui.router import WindowRouter
-    from mediaforge.ui.theme import palette_for
 
     loop = asyncio.get_running_loop()
     loop.set_exception_handler(_log_unhandled)
@@ -212,7 +218,7 @@ async def run(args: LaunchArgs, primary: Primary) -> RunOutcome:
     services = await build_services(paths, _legacy_dirs())
     try:
         ctk.set_appearance_mode(services.app_settings.theme)
-        palette = palette_for(services.app_settings.theme)
+        palette = start_palette(services.app_settings)
         window = MainWindow(services, palette)
         gc_guard.start(window)
         shell = window.shell

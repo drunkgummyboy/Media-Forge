@@ -24,6 +24,7 @@ class AppSettings(BaseModel):
     ytdlp_checked_at: float = 0.0
     first_start_done: bool = False
     auto_update: bool = True
+    accent: str = "slate"  # AirGrabber's accent colours (ui/palettes.py); takes a restart
 
 
 class SettingsRepo:

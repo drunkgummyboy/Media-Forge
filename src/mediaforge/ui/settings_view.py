@@ -24,7 +24,7 @@ from mediaforge.models.media import MatchState, MediaKind, ParsedMedia, Resolved
 from mediaforge.models.preset import Preset, PresetOptions
 from mediaforge.platform import context_menu
 from mediaforge.ui.queue_view import OPTION_LABELS
-from mediaforge.ui.theme import Palette, font
+from mediaforge.ui.theme import ACCENTS, Palette, accent_label, accent_swatch, font
 from mediaforge.ui.widgets.dialogs import ask_choice
 
 if TYPE_CHECKING:
@@ -81,14 +81,36 @@ class SettingsView(ctk.CTkFrame):
         ctk.CTkLabel(head, text="Settings", font=font(16, "bold"), text_color=palette.text).pack(
             side="left"
         )
-        self.body = ctk.CTkScrollableFrame(self, fg_color=palette.main, corner_radius=0)
-        self.body.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self._build_appearance()
-        self._build_tmdb()
-        self._build_presets()
-        self._build_menu()
-        self._build_matches()
-        self._build_about()
+        self.tab_names = ["Naming", "TMDB", "Right-click menu", "Looks", "About"]
+        self.tabs = ctk.CTkTabview(
+            self,
+            fg_color=palette.main,
+            segmented_button_fg_color=palette.raised,
+            segmented_button_selected_color=palette.accent,
+            segmented_button_selected_hover_color=palette.accent_hover,
+            segmented_button_unselected_color=palette.raised,
+            segmented_button_unselected_hover_color=palette.border,
+            text_color=palette.text,
+            anchor="w",
+        )
+        self.tabs.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        builders: dict[str, tuple[Callable[[], None], ...]] = {
+            "Naming": (self._build_presets, self._build_matches),
+            "TMDB": (self._build_tmdb,),
+            "Right-click menu": (self._build_menu,),
+            "Looks": (self._build_appearance,),
+            "About": (self._build_about,),
+        }
+        for name in self.tab_names:
+            self.tabs.add(name)
+            # Each tab scrolls on its own; `_section` builds into the tab being filled.
+            self.body = ctk.CTkScrollableFrame(
+                self.tabs.tab(name), fg_color=palette.main, corner_radius=0
+            )
+            self.body.pack(fill="both", expand=True)
+            for build in builders[name]:
+                build()
+        self.tabs.set("Naming")
 
     # --- plumbing --------------------------------------------------------------------------
 
@@ -168,7 +190,10 @@ class SettingsView(ctk.CTkFrame):
     # --- appearance ------------------------------------------------------------------------
 
     def _build_appearance(self) -> None:
-        box = self._section("Appearance", "Changes apply the next time MediaForge starts.")
+        box = self._section("Looks", "Changes apply the next time MediaForge starts.")
+        ctk.CTkLabel(box, text="Light or dark", font=font(12), text_color=self.palette.muted).pack(
+            anchor="w", pady=(0, 4)
+        )
         self.theme = ctk.CTkSegmentedButton(
             box,
             values=["Dark", "Light", "System"],
@@ -180,6 +205,43 @@ class SettingsView(ctk.CTkFrame):
             font=font(12),
         )
         self.theme.pack(anchor="w")
+        ctk.CTkLabel(
+            box,
+            text="Accent colour (the same choice as in AirGrabber)",
+            font=font(12),
+            text_color=self.palette.muted,
+        ).pack(anchor="w", pady=(12, 4))
+        swatches = ctk.CTkFrame(box, fg_color="transparent")
+        swatches.pack(anchor="w")
+        self.accent_buttons: dict[str, ctk.CTkButton] = {}
+        chosen = self.services.app_settings.accent
+        for index, accent in enumerate(ACCENTS):
+            swatch = accent_swatch(accent)
+            button = ctk.CTkButton(
+                swatches,
+                text="✓" if accent == chosen else "",
+                width=34,
+                height=34,
+                corner_radius=17,
+                fg_color=swatch,
+                hover_color=swatch,
+                text_color="#FFFFFF",
+                font=font(14, "bold"),
+                command=lambda a=accent: self.spawn(self.set_accent(a)),
+            )
+            button.grid(row=0, column=index, padx=(0, 6))
+            ctk.CTkLabel(
+                swatches, text=accent_label(accent), font=font(10), text_color=self.palette.muted
+            ).grid(row=1, column=index, padx=(0, 6))
+            self.accent_buttons[accent] = button
+
+    async def set_accent(self, accent: str) -> None:
+        settings = await self.services.settings.load()
+        self.services.app_settings = settings.model_copy(update={"accent": accent})
+        await self.services.settings.save(self.services.app_settings)
+        for name, button in self.accent_buttons.items():
+            button.configure(text="✓" if name == accent else "")
+        log.info("Accent colour set to %s; restart MediaForge to see it", accent_label(accent))
 
     async def set_theme(self, theme: str) -> None:
         settings = await self.services.settings.load()
