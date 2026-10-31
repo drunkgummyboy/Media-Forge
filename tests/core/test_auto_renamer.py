@@ -279,9 +279,10 @@ async def test_the_evening_summary_counts_todays_automatic_renames(
     services: Services, folders: Folders
 ) -> None:
     use(services, folders)
-    folders.download("Dune.2021.2160p.WEB-DL.mkv")
+    file = folders.download("Dune.2021.2160p.WEB-DL.mkv")
     clock = Clock()
     clock.now = datetime.now().replace(hour=20, minute=30).timestamp()
+    os.utime(file, (clock.now - 3600, clock.now - 3600))  # finished an hour before "now"
     notes: list[tuple[str, str]] = []
     auto = renamer(services, clock, notes)
     await two_looks(auto, clock)
