@@ -232,6 +232,10 @@ async def run(args: LaunchArgs, primary: Primary) -> RunOutcome:
         inbox.attach(router.handle)
         shell.spawn(shell.check_for_update())  # right-click-only launches update too
         shell.spawn(shell.refresh_menu())  # follow this copy's location and new presets
+        # customtkinter keeps a new window hidden on Windows until its own update() or
+        # mainloop() runs, and the async loop calls neither (a withdrawn confirm-only window
+        # stays hidden).
+        window.update()
         await main_loop(window)
         return RunOutcome(restart=shell.restart_requested)
     finally:
