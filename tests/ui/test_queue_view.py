@@ -52,7 +52,7 @@ async def test_queue_view_lists_added_files(
     await add_and_settle(tk_root, view, tmp_path / "in")
     rows = view.list.rows
     assert len([r for r in rows if r.kind == "item"]) == 5
-    assert [r for r in rows if r.kind == "group"]
+    assert [r for r in rows if r.kind == "band"]  # 1.2: show bands, not folder headings
     assert view.list.winfo_ismapped() and not view.empty_state.winfo_ismapped()
     assert "5 files" in view.count_label.cget("text")
 
@@ -283,3 +283,138 @@ async def test_close_during_forge_waits_for_the_run(
     ops = await services.history.operations(run.id)
     assert ops and all(o.state.value == "done" for o in ops)
     assert 1 <= run.file_count < 3
+
+
+def bands(view: QueueView) -> list[str]:
+    return [r.title for r in view.list.rows if r.kind == "band"]
+
+
+def band_key(view: QueueView, title: str) -> int:
+    return next(r.key for r in view.list.rows if r.kind == "band" and r.title.startswith(title))
+
+
+async def test_inbox_groups_episodes_into_show_bands(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    make_files(
+        tmp_path / "in",
+        [
+            "Ted.Lasso.S04E03.1080p.WEB.mkv",
+            "Ted.Lasso.S04E05.1080p.WEB.mkv",
+            "Severance.S03E02.2160p.WEB-DL.mkv",
+        ],
+    )
+    view.select_preset("Series (Folder)")
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    rows = view.list.rows
+    assert rows[0].kind == "section" and rows[0].title == "Needs you"
+    assert bands(view) == ["Severance", "Ted Lasso"]
+    ted = next(r for r in rows if r.kind == "band" and r.title == "Ted Lasso")
+    assert ted.subtitle.startswith("Season 4 · 2 episodes → ")
+    after = rows[rows.index(ted) + 1 : rows.index(ted) + 3]
+    assert [r.code for r in after] == ["S04E03", "S04E05"]
+    assert after[0].faint == "Ted.Lasso.S04E03.1080p.WEB.mkv"
+    assert ted.actions == (("rename", "Rename"),)
+
+
+async def test_movies_are_on_the_movies_side(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Review focus 4: shows and movies dropped together each land on their own side.
+    counts: list[tuple[int, int]] = []
+    view.on_counts = lambda needs, other: counts.append((needs, other))
+    make_files(tmp_path / "in", ["Dune.2021.mkv", "Ted.Lasso.S04E03.1080p.WEB.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    assert view.kind == "series" and bands(view) == ["Ted Lasso"]
+    assert counts[-1] == (2, 1)
+    view.set_kind("movies")
+    await pump(tk_root, 0.1)
+    assert bands(view) == ["Dune (2021)"]
+    assert counts[-1] == (2, 1)
+
+
+async def test_the_side_with_files_is_shown_when_this_one_is_empty(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    switched: list[str] = []
+    view.on_kind = switched.append
+    make_files(tmp_path / "in", ["Dune.2021.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    assert switched == ["movies"] and view.kind == "movies"
+    assert bands(view) == ["Dune (2021)"]
+
+
+async def test_finished_items_move_to_done(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    make_files(tmp_path / "in", ["Dune.2021.mkv", "Heat.1995.1080p.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    view.select_preset("Movie (Flat)")
+    await view.settled()
+    await view.forge()
+    await pump(tk_root, 0.2)
+    rows = view.list.rows
+    assert [r.title for r in rows if r.kind == "section"] == ["Done"]
+    done = [r for r in rows if r.kind == "band"]
+    assert len(done) == 2 and all(r.note and not r.actions for r in done)
+    lines = [r for r in rows if r.kind == "item"]
+    assert {r.faint for r in lines} == {"Dune.2021.mkv", "Heat.1995.1080p.mkv"}
+
+
+async def test_band_rename_renames_only_that_band(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    make_files(
+        tmp_path / "in", ["Ted.Lasso.S04E03.1080p.WEB.mkv", "Severance.S03E02.2160p.WEB-DL.mkv"]
+    )
+    view.select_preset("Series (Flat)")
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    await view.settled()
+    view.list.on_action(band_key(view, "Severance"), "rename")
+    await pump_until(tk_root, lambda: not view.busy and len(view.services.queue.pending()) == 1)
+    names = sorted(p.name for p in (tmp_path / "in").iterdir())
+    assert "Ted.Lasso.S04E03.1080p.WEB.mkv" in names
+    assert "Severance.S03E02.2160p.WEB-DL.mkv" not in names
+
+
+async def test_band_choose_opens_the_picker_for_the_unsure_item(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from mediaforge.ui import queue_view
+
+    asked: list[int] = []
+
+    async def fake_ask(master: object, item: object, services: object, palette: object) -> str:
+        asked.append(item.id)  # type: ignore[attr-defined]
+        return "cancel"
+
+    monkeypatch.setattr(queue_view.MatchPicker, "ask", fake_ask)
+    make_files(tmp_path / "in", ["Shrinking.S03E01.1080p.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    [item] = view.services.queue.items
+    item.status = ItemStatus.NEEDS_CHOICE
+    view.refresh()
+    band = next(r for r in view.list.rows if r.kind == "band")
+    assert band.title == "Shrinking?" and band.actions[0] == ("choose", "Choose…")
+    view.list.on_action(band.key, "choose")
+    await pump(tk_root, 0.1)
+    assert asked == [item.id]
+
+
+async def test_inbox_fits_the_minimum_window(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    # Review focus 5: header and bottom-bar buttons stay on screen at 1000×640.
+    old = tk_root.geometry()
+    tk_root.geometry("1000x640")
+    try:
+        make_files(tmp_path / "in", ["Dune.2021.mkv"])
+        await add_and_settle(tk_root, view, tmp_path / "in")
+        await pump(tk_root, 0.3)
+        right = view.winfo_rootx() + view.winfo_width()
+        for widget in (view.forge_button, view.preview_button, view.preset_menu):
+            assert widget.winfo_ismapped()
+            assert widget.winfo_rootx() + widget.winfo_width() <= right
+        assert view.title_label.cget("text") == "Inbox"
+    finally:
+        tk_root.geometry(old)

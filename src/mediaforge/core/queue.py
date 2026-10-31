@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import itertools
 import os
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -52,6 +53,7 @@ class QueueItem:
     resolution: Resolution | None = None
     status: ItemStatus = ItemStatus.LOOKING_UP
     message: str = ""
+    finished_at: float | None = None  # when a run renamed it or found it already right
 
     @property
     def root(self) -> Path:
@@ -277,6 +279,7 @@ class Queue:
             item.status = ItemStatus.DONE
         else:
             item.status = ItemStatus.SKIPPED
+        item.finished_at = time.time()
         self._on_change(QueueEvent(kind="updated", ids=(item_id,)))
 
     def uncertain(self) -> list[QueueItem]:

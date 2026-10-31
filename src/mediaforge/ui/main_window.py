@@ -219,6 +219,8 @@ class MainShell(ctk.CTkFrame):
 
         settings.on_presets_changed = presets_changed
         settings.on_restart = self.request_restart
+        queue.on_counts = self.set_counts
+        queue.on_kind = self.set_kind
         self.set_view("queue", queue)
         self.set_view("history", HistoryView(self.content, self.services, self.palette))
         self.set_view("settings", settings)

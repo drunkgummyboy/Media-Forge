@@ -1,13 +1,22 @@
-"""The Queue view: what will be renamed, to what, and the Forge button."""
+"""The Inbox (internally still the Queue view): what will be renamed, to what, and Forge.
+
+Files appear as show and movie bands (AirGrabber's family look): "Needs you" above "Done", one
+band per show with its episodes as short lines under it, one band per movie; the Series | Movies
+switch in the top band picks which kind is shown.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import functools
+import itertools
 import logging
 import re
+import time
 import tkinter as tk
+from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from tkinter import filedialog
 from typing import TYPE_CHECKING, Any, Concatenate
@@ -23,6 +32,7 @@ from mediaforge.models.history import RunSource
 from mediaforge.models.media import MediaKind
 from mediaforge.models.preset import Preset, PresetOptions
 from mediaforge.ui.detail_panel import DetailPanel
+from mediaforge.ui.images import ImageCache
 from mediaforge.ui.match_picker import MatchPicker
 from mediaforge.ui.theme import Palette, font
 from mediaforge.ui.widgets.chips import Chip
@@ -120,6 +130,126 @@ def build_rows(items: Sequence[QueueItem], fmt: str) -> tuple[list[Row], dict[in
     return rows, targets
 
 
+_FINISHED = (ItemStatus.DONE, ItemStatus.SKIPPED)
+
+
+def item_kind(item: QueueItem) -> str:
+    """Which side of the Series | Movies switch a file is on."""
+    return "series" if item.media.kind is MediaKind.EPISODE else "movies"
+
+
+@dataclass
+class InboxRows:
+    rows: list[Row] = field(default_factory=list[Row])
+    targets: dict[int, Path] = field(default_factory=dict[int, Path])
+    bands: dict[int, list[int]] = field(default_factory=dict[int, list[int]])  # band → items
+    needs: int = 0  # files not yet renamed, both kinds
+    other_kind: int = 0  # files on the other side of the switch
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _seasons(group: Sequence[QueueItem]) -> str:
+    numbers = sorted({i.media.parsed.season for i in group if i.media.parsed.season is not None})
+    if not numbers:
+        return ""
+    if len(numbers) == 1:
+        return f"Season {numbers[0]}"
+    return f"Seasons {numbers[0]}–{numbers[-1]}"
+
+
+def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRows:
+    """The Inbox's rows for one kind ("series", "movies" or "all")."""
+    out = InboxRows()
+    rendered = {}
+    for item in items:
+        rendered[item.id] = render(fmt, item.media, item.path.suffix)
+        out.targets[item.id] = item.root.joinpath(*rendered[item.id].parts)
+    per_kind = Counter(item_kind(i) for i in items)
+    out.needs = sum(1 for i in items if i.status not in _FINISHED)
+    out.other_kind = 0 if kind == "all" else sum(n for k, n in per_kind.items() if k != kind)
+    shown = [i for i in items if kind == "all" or item_kind(i) == kind]
+    keys = itertools.count(1)
+    sections = (
+        ("Needs you", [i for i in shown if i.status not in _FINISHED]),
+        ("Done", [i for i in shown if i.status in _FINISHED]),
+    )
+    for section, members in sections:
+        if not members:
+            continue
+        out.rows.append(
+            Row(key=-next(keys), kind="section", title=section, subtitle=str(len(members)))
+        )
+        groups: dict[tuple[str, int | None, bool], list[QueueItem]] = {}
+        for item in members:
+            media = item.media
+            episodes = media.kind is MediaKind.EPISODE
+            groups.setdefault((media.title.casefold(), media.year, episodes), []).append(item)
+        for (_, _, episodes), group in sorted(
+            groups.items(), key=lambda kv: (kv[0][0], kv[0][1] or 0)
+        ):
+            group.sort(
+                key=lambda i: (i.media.parsed.season or 0, i.media.parsed.episode or 0, i.path.name)
+            )
+            first = group[0].media
+            unsure = any(i.status is ItemStatus.NEEDS_CHOICE for i in group)
+            parts = rendered[group[0].id].parts
+            where = " › ".join(parts[:-1]) or "the same folder"
+            if unsure:
+                subtitle = f"TMDB isn't sure · {_plural(len(group), 'file')}"
+            elif episodes:
+                count = _plural(len(group), "episode")
+                subtitle = " · ".join(x for x in (_seasons(group), count) if x) + f" → {where}"
+            else:
+                subtitle = (
+                    f"{_plural(len(group), 'file')} " if len(group) > 1 else ""
+                ) + f"→ {where}"
+            band_key = -next(keys)
+            out.bands[band_key] = [i.id for i in group]
+            if section == "Done":
+                times = [i.finished_at for i in group if i.finished_at]
+                note = time.strftime("%H:%M", time.localtime(max(times))) if times else "Done"
+                actions: tuple[tuple[str, str], ...] = ()
+            else:
+                note = ""
+                actions = (
+                    (("choose", "Choose…"), ("rename", "Rename"))
+                    if unsure
+                    else (("rename", "Rename"),)
+                )
+            out.rows.append(
+                Row(
+                    key=band_key,
+                    kind="band",
+                    title=(first.title if episodes else first.ny) + ("?" if unsure else ""),
+                    subtitle=subtitle,
+                    badge=first.title,
+                    art=first.poster_path,
+                    backdrop=first.backdrop_path,
+                    actions=actions,
+                    note=note,
+                )
+            )
+            for item in group:
+                name = rendered[item.id].parts[-1]
+                code = _SE.search(name) if episodes else None
+                title = item.media.episode_title if episodes and item.media.episode_title else name
+                out.rows.append(
+                    Row(
+                        key=item.id,
+                        kind="item",
+                        title=title,
+                        code=code.group(0) if code else "",
+                        faint=item.parsed.source_name,
+                        status=item.status.value,
+                        badge=first.title,
+                    )
+                )
+    return out
+
+
 class QueueView(ctk.CTkFrame):
     def __init__(self, master: Any, services: Services, palette: Palette) -> None:
         super().__init__(master, fg_color=palette.main, corner_radius=0)
@@ -130,6 +260,11 @@ class QueueView(ctk.CTkFrame):
         self.options = PresetOptions()
         self.running = False
         self.kind = "series"
+        self.on_counts: Callable[[int, int], None] = lambda needs, other: None  # top band
+        self.on_kind: Callable[[str], None] = lambda kind: None  # this side was empty
+        self._bands: dict[int, list[int]] = {}
+        self.images = ImageCache(self._fetch_image)
+        self._loading: set[tuple[str, str]] = set()
         self.busy = False  # set by @_one_at_a_time while Preview, Forge or Undo is going
         self._targets_in_run: dict[int, Path] = {}
         self._close_after_run: Callable[[], None] | None = None
@@ -164,7 +299,8 @@ class QueueView(ctk.CTkFrame):
         p = self.palette
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=16, pady=(14, 6))
-        ctk.CTkLabel(top, text="Queue", font=font(16, "bold"), text_color=p.text).pack(side="left")
+        self.title_label = ctk.CTkLabel(top, text="Inbox", font=font(16, "bold"), text_color=p.text)
+        self.title_label.pack(side="left")
         self.count_label = ctk.CTkLabel(top, text="", font=font(12), text_color=p.muted)
         self.count_label.pack(side="left", padx=(10, 14))
         self.preset_menu = ctk.CTkOptionMenu(
@@ -231,9 +367,11 @@ class QueueView(ctk.CTkFrame):
         p = self.palette
         holder = ctk.CTkFrame(self, fg_color="transparent")
         holder.grid(row=2, column=0, sticky="nsew", padx=(8, 0))
-        self.list = VirtualList(holder, p)
+        self.list = VirtualList(holder, p, row_height=34, thumbnails=False)
         self.list.on_select = self._on_select
         self.list.on_remove = self._remove
+        self.list.on_action = self._on_band_action
+        self.list.images = self._images_for
         self.empty_state = ctk.CTkFrame(holder, fg_color="transparent")
         ctk.CTkLabel(self.empty_state, text="⤓", font=font(40), text_color=p.muted).pack(
             pady=(70, 6)
@@ -429,8 +567,13 @@ class QueueView(ctk.CTkFrame):
     def refresh(self) -> None:
         self._refresh_id = None
         items = self.services.queue.items
-        rows, self._targets = build_rows(items, self.fmt)
-        self.list.set_rows(rows)
+        inbox = build_inbox_rows(items, self.fmt, self.kind)
+        if not inbox.rows and inbox.other_kind:  # nothing on this side: show the other one
+            self.kind = "movies" if self.kind == "series" else "series"
+            self.on_kind(self.kind)
+            inbox = build_inbox_rows(items, self.fmt, self.kind)
+        self._targets, self._bands = inbox.targets, inbox.bands
+        self.list.set_rows(inbox.rows)
         if items:
             self.empty_state.pack_forget()
             self.list.pack(fill="both", expand=True)
@@ -446,6 +589,50 @@ class QueueView(ctk.CTkFrame):
         self._update_preview_line()
         selected = self.services.queue.get(self.list.selected) if self.list.selected else None
         self.detail.show(selected, self._targets.get(selected.id) if selected else None)
+        self.on_counts(inbox.needs, inbox.other_kind)
+
+    # --- bands -----------------------------------------------------------------------------
+
+    async def _fetch_image(self, path: str, size: str) -> bytes | None:
+        tmdb = self.services.tmdb
+        return await tmdb.image(path, size) if tmdb is not None else None
+
+    def _images_for(self, row: Row, width: int, height: int) -> tuple[Any, Any]:
+        """A band's poster and backdrop when loaded; otherwise start loading them."""
+        inset = round(6 * self.list._get_widget_scaling())  # pyright: ignore[reportPrivateUsage]
+        poster_h = height - 2 * inset
+        poster_w = round(poster_h * 2 / 3)
+        fade = self.palette.main
+        poster = self.images.cached_poster(row.art, poster_w, poster_h) if row.art else None
+        backdrop = (
+            self.images.cached_backdrop(row.backdrop, width, height, fade) if row.backdrop else None
+        )
+        wanted: list[Awaitable[Any]] = []
+        if row.art and poster is None and ("poster", row.art) not in self._loading:
+            self._loading.add(("poster", row.art))
+            wanted.append(self.images.poster(row.art, poster_w, poster_h))
+        if row.backdrop and backdrop is None and ("backdrop", row.backdrop) not in self._loading:
+            self._loading.add(("backdrop", row.backdrop))
+            wanted.append(self.images.backdrop(row.backdrop, width, height, fade))
+        if wanted:
+            self.spawn(self._load_images(wanted))
+        return poster, backdrop
+
+    async def _load_images(self, wanted: Sequence[Awaitable[Any]]) -> None:
+        results = await asyncio.gather(*wanted)
+        if any(r is not None for r in results) and self.winfo_exists():
+            self.list.refresh_images()
+
+    def _on_band_action(self, key: int, action: str) -> None:
+        ids = self._bands.get(key, [])
+        if action == "rename":
+            self.spawn(self.forge(only=ids))
+        elif action == "choose":
+            for item_id in ids:
+                item = self.services.queue.get(item_id)
+                if item is not None and item.status is ItemStatus.NEEDS_CHOICE:
+                    self._change_match(item)
+                    return
 
     def _update_preview_line(self) -> None:
         items = self.services.queue.items
@@ -536,8 +723,10 @@ class QueueView(ctk.CTkFrame):
         await self.services.queue.choose_match(item.id, choice)
         return True
 
-    async def _settle_uncertain(self) -> bool:
-        uncertain = self.services.queue.uncertain()
+    async def _settle_uncertain(self, only: Sequence[int] | None = None) -> bool:
+        uncertain = [
+            i for i in self.services.queue.uncertain() if only is None or i.id in set(only)
+        ]
         if not uncertain:
             return True
         n = len(uncertain)
@@ -636,13 +825,18 @@ class QueueView(ctk.CTkFrame):
         for line in describe(plan):
             log.info(line)
 
+    def _pending(self, only: Sequence[int] | None) -> list[QueueItem]:
+        pending = self.pending_items()
+        return pending if only is None else [i for i in pending if i.id in set(only)]
+
     @_one_at_a_time
-    async def forge(self) -> None:
+    async def forge(self, only: Sequence[int] | None = None) -> None:
+        """Rename every pending file, or only those in `only` (a band's Rename)."""
         await self.settled()
-        if not self.pending_items() or not await self._settle_uncertain():
+        if not self._pending(only) or not await self._settle_uncertain(only):
             return
         options = await self._trailer_options(self.options)
-        items = self.pending_items()
+        items = self._pending(only)
         self._cancel = asyncio.Event()
         self.cancel_button.configure(command=self._cancel.set)
         self._set_running(True)
