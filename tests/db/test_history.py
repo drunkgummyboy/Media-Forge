@@ -10,6 +10,7 @@ from mediaforge.models.history import (
     RunSource,
     UndoState,
 )
+from mediaforge.models.media import MediaKind
 
 A, B = Path(r"C:\m\a.mkv"), Path(r"C:\m\b.mkv")
 
@@ -143,3 +144,56 @@ async def test_run_with_pending_ops_is_kept(db: Database) -> None:
     await repo.record_pending(run_id, OpKind.RENAME, A, B)
     assert await repo.finish_run(run_id) is True
     assert [o.run_id for o in await repo.pending_operations()] == [run_id]
+
+
+async def test_was_undone(db: Database) -> None:
+    repo = HistoryRepo(db)
+    run_id = await repo.start_run(RunSource.AUTOMATIC, "Series (Folder)")
+    op = await repo.record_pending(run_id, OpKind.RENAME, A, B)
+    await repo.mark_done(op)
+    assert await repo.finish_run(run_id)
+    assert not await repo.was_undone(A)
+    await repo.mark_undo(op, UndoState.DONE)
+    assert await repo.was_undone(A)
+    assert not await repo.was_undone(B)
+
+
+async def test_runs_remember_their_kinds(db: Database) -> None:
+    repo = HistoryRepo(db)
+    both = await repo.start_run(RunSource.APP, "Auto", kinds=[MediaKind.EPISODE, MediaKind.MOVIE])
+    shows = await repo.start_run(RunSource.AUTOMATIC, "Series (Folder)", kinds=[MediaKind.EPISODE])
+    unknown = await repo.start_run(RunSource.APP, "Auto")
+    for run_id in (both, shows, unknown):
+        op = await repo.record_pending(run_id, OpKind.RENAME, A, B)
+        await repo.mark_done(op)
+        assert await repo.finish_run(run_id)
+    kinds = {r.id: r.kinds for r in await repo.list_runs()}
+    assert kinds[both] == {MediaKind.EPISODE, MediaKind.MOVIE}
+    assert kinds[shows] == {MediaKind.EPISODE}
+    assert kinds[unknown] == frozenset()
+
+
+async def test_a_version_1_database_gains_kinds(tmp_path: Path) -> None:
+    import aiosqlite
+
+    from mediaforge.db.database import _SCHEMA_V1  # pyright: ignore[reportPrivateUsage]
+
+    path = tmp_path / "old.db"
+    async with aiosqlite.connect(path) as conn:
+        await conn.executescript(_SCHEMA_V1)
+        await conn.execute("PRAGMA user_version=1")
+        await conn.execute(
+            "INSERT INTO runs (started_at, finished_at, source, preset_name) "
+            "VALUES (1, 2, 'app', 'Auto')"
+        )
+        await conn.execute(
+            "INSERT INTO operations (run_id, seq, kind, src, dst, state) "
+            "VALUES (1, 1, 'rename', 'a', 'b', 'done')"
+        )
+        await conn.commit()
+    db = await Database.open(path)
+    try:
+        [run] = await HistoryRepo(db).list_runs()
+        assert run.kinds == frozenset()
+    finally:
+        await db.close()

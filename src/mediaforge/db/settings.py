@@ -25,6 +25,18 @@ class AppSettings(BaseModel):
     first_start_done: bool = False
     auto_update: bool = True
     accent: str = "slate"  # AirGrabber's accent colours (ui/palettes.py); takes a restart
+    # Renaming on its own (1.3): every folder is chosen in Settings › Library, nothing assumed.
+    watch_folders: list[str] = []
+    series_folder: str = ""
+    movies_folder: str = ""
+    series_preset: str = "Series (Folder)"
+    movies_preset: str = "Movie (Folder)"
+    automatic: Literal["off", "trial", "on"] = "off"
+    clean_downloads: bool = True
+    notify_needs: bool = True
+    daily_summary: bool = True
+    summary_sent_on: str = ""  # ISO date of the last evening summary
+    tray_notice_shown: bool = False
 
 
 class SettingsRepo:

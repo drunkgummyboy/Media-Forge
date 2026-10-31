@@ -8,7 +8,7 @@ import pytest_asyncio
 from mediaforge.app import Services
 from mediaforge.core.matcher import Resolution
 from mediaforge.core.queue import ItemStatus
-from mediaforge.models.media import MatchState, ResolvedMedia
+from mediaforge.models.media import MatchState, MediaKind, ResolvedMedia
 from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.images import ImageCache
 from mediaforge.ui.queue_view import QueueView
@@ -95,7 +95,8 @@ async def test_forge_renames_and_shows_done(
     ]
     assert all(i.status is ItemStatus.DONE for i in services.queue.items)
     assert {r.status for r in view.list.rows if r.kind == "item"} == {"done"}
-    assert len(await services.history.list_runs()) == 1
+    [run] = await services.history.list_runs()
+    assert run.kinds == {MediaKind.MOVIE}  # History's Series | Movies switch uses this
     assert "Forge" in view.forge_button.cget("text")
 
 

@@ -898,6 +898,7 @@ class QueueView(ctk.CTkFrame):
                 preset_name=self.preset.name if self.preset else None,
                 on_progress=self._on_progress,
                 cancel=self._cancel,
+                kinds={i.media.kind for i in items},
             )
         finally:
             self._set_running(False)

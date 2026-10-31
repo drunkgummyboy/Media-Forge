@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, cast
 
@@ -14,6 +14,7 @@ from mediaforge.core import fsops
 from mediaforge.core.cleanup import find_cleanup_targets
 from mediaforge.db.history import HistoryRepo
 from mediaforge.models.history import OpKind, RunSource
+from mediaforge.models.media import MediaKind
 from mediaforge.models.plan import Plan, PlannedTrailer
 
 log = logging.getLogger("mediaforge.executor")
@@ -108,10 +109,11 @@ class Executor:
         preset_name: str | None,
         on_progress: Callable[[ProgressEvent], None],
         cancel: asyncio.Event,
+        kinds: Collection[MediaKind] = (),
     ) -> RunResult:
         history = self._history
         result = RunResult()
-        run_id = await history.start_run(source, preset_name)
+        run_id = await history.start_run(source, preset_name, kinds=kinds)
         try:
             await self._clean(run_id, plan, result)
             succeeded = await self._files(run_id, plan, result, on_progress, cancel)

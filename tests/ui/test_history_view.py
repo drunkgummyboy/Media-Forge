@@ -231,3 +231,18 @@ async def test_runs_are_grouped_under_day_headings(
     await pump(tk_root, 0.05)
     assert view.day_labels() == ["Today", "Yesterday"]
     assert [len(cards) for cards in view.cards_by_day().values()] == [2, 1]
+
+
+async def test_automatic_runs_are_labelled(
+    tk_root: DnDCTk, view: HistoryView, services: Services
+) -> None:
+    history = services.history
+    run_id = await history.start_run(RunSource.AUTOMATIC, "Series (Folder)")
+    op = await history.record_pending(
+        run_id, OpKind.RENAME, Path(r"C:\d\a.mkv"), Path(r"C:\s\b.mkv")
+    )
+    await history.mark_done(op)
+    assert await history.finish_run(run_id)
+    await view.reload()
+    await pump(tk_root, 0.05)
+    assert view.cards[0].tag_text() == "automatic"

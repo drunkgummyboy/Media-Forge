@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from mediaforge.models.media import MediaKind
+
 HISTORY_LIMIT = 50
 
 
@@ -35,6 +37,7 @@ class RunSource(StrEnum):
     APP = "app"
     RIGHT_CLICK = "right-click"
     IMPORT = "import"
+    AUTOMATIC = "automatic"  # a watched download, renamed and moved on its own
 
 
 class Operation(BaseModel):
@@ -71,6 +74,7 @@ class RunSummary(BaseModel):
     created_count: int
     undoable_count: int
     undone_count: int
+    kinds: frozenset[MediaKind] = frozenset()  # empty for runs from before 1.3
 
     @property
     def status(self) -> Literal["active", "partly-undone", "undone"]:

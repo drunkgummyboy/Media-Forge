@@ -271,6 +271,7 @@ class ConfirmWindow(ctk.CTkToplevel):
             preset_name=preset.name,
             on_progress=lambda event: None,
             cancel=asyncio.Event(),
+            kinds={item.media.kind for item in self.queue.items if item.id in set(ids)},
         )
         self.run_id = result.run_id
         summary = f"{result.renamed} renamed"

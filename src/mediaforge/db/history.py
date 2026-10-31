@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -18,6 +18,7 @@ from mediaforge.models.history import (
     RunSummary,
     UndoState,
 )
+from mediaforge.models.media import MediaKind
 
 _OP_COLUMNS = (
     "id, run_id, seq, kind, src, dst, size, mtime_ns, state, error, "
@@ -25,7 +26,7 @@ _OP_COLUMNS = (
 )
 
 _SUMMARY_SQL = """
-SELECT r.id, r.started_at, r.finished_at, r.source, r.preset_name,
+SELECT r.id, r.started_at, r.finished_at, r.source, r.preset_name, r.kinds,
   COALESCE(SUM(o.kind = 'rename' AND o.state = 'done'), 0),
   COALESCE(SUM(o.kind = 'create_file' AND o.state = 'done'), 0),
   COALESCE(SUM(o.state = 'done' AND o.kind != 'delete_file'
@@ -67,12 +68,16 @@ class HistoryRepo:
         self._db = db
 
     async def start_run(
-        self, source: RunSource, preset_name: str | None, started_at: datetime | None = None
+        self,
+        source: RunSource,
+        preset_name: str | None,
+        started_at: datetime | None = None,
+        kinds: Collection[MediaKind] = (),
     ) -> int:
         when = started_at.timestamp() if started_at else time.time()
         cur = await self._db.conn.execute(
-            "INSERT INTO runs (started_at, source, preset_name) VALUES (?, ?, ?)",
-            (when, source.value, preset_name),
+            "INSERT INTO runs (started_at, source, preset_name, kinds) VALUES (?, ?, ?, ?)",
+            (when, source.value, preset_name, ",".join(sorted(k.value for k in set(kinds)))),
         )
         await self._db.conn.commit()
         assert cur.lastrowid is not None
@@ -154,13 +159,22 @@ class HistoryRepo:
                 finished_at=_ts(r[2]),
                 source=RunSource(r[3]),
                 preset_name=r[4],
-                file_count=r[5],
-                created_count=r[6],
-                undoable_count=r[7],
-                undone_count=r[8],
+                kinds=frozenset(MediaKind(k) for k in r[5].split(",") if k),
+                file_count=r[6],
+                created_count=r[7],
+                undoable_count=r[8],
+                undone_count=r[9],
             )
             for r in rows
         ]
+
+    async def was_undone(self, src: Path) -> bool:
+        """Whether a rename away from `src` was undone (the file was put back there)."""
+        async with self._db.conn.execute(
+            "SELECT 1 FROM operations WHERE kind = ? AND src = ? AND undo_state = ? LIMIT 1",
+            (OpKind.RENAME.value, str(src), UndoState.DONE.value),
+        ) as cur:
+            return await cur.fetchone() is not None
 
     async def _select_ops(self, where: str, params: Sequence[Any]) -> list[Operation]:
         async with self._db.conn.execute(

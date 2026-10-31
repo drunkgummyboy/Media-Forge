@@ -169,9 +169,11 @@ class RunCard(ctk.CTkFrame):
             return f"Undone {self.undone_at:%d %b}" if self.undone_at else "Undone"
         if self.run.status == "partly-undone":
             return "Partly undone"
-        return {RunSource.RIGHT_CLICK: "right-click", RunSource.IMPORT: "imported"}.get(
-            self.run.source, ""
-        )
+        return {
+            RunSource.RIGHT_CLICK: "right-click",
+            RunSource.IMPORT: "imported",
+            RunSource.AUTOMATIC: "automatic",
+        }.get(self.run.source, "")
 
     async def toggle(self) -> None:
         if self.expanded:

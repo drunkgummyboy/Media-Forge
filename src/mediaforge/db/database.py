@@ -6,7 +6,7 @@ from pathlib import Path
 
 import aiosqlite
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -81,6 +81,9 @@ class Database:
         version = int(row[0]) if row else 0
         if version < 1:
             await self.conn.executescript(_SCHEMA_V1)
+        if version < 2:  # 1.3: which kinds a run renamed, for History's Series | Movies switch
+            await self.conn.execute("ALTER TABLE runs ADD COLUMN kinds TEXT NOT NULL DEFAULT ''")
+        if version < SCHEMA_VERSION:
             await self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             await self.conn.commit()
 
