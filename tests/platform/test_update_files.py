@@ -1,5 +1,7 @@
 import io
+import uuid
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -170,11 +172,16 @@ def test_interrupted_swap_leaves_a_working_copy(
     assert one_whole_version(root) == "1.1.0"
 
 
-def recover_from_main_py() -> object:
+def recover_from_main_py() -> Callable[[Path], None]:
+    """main.py's repair step, with a lock name of its own: a real MediaForge running on this
+    PC holds the real lock, and the repair rightly waits while it does."""
     import runpy
+    import uuid
 
     main = Path(__file__).resolve().parents[2] / "main.py"
-    return runpy.run_path(str(main), run_name="not_main")["recover"]
+    recover = runpy.run_path(str(main), run_name="not_main")["recover"]
+    name = f"recover-test-{uuid.uuid4().hex}"
+    return lambda root: recover(root, lock_name=name)
 
 
 @pytest.mark.parametrize("step", range(1, 7))
@@ -273,7 +280,7 @@ def test_recovery_reloads_the_restored_code(tmp_path: Path) -> None:
     script = (
         "import runpy\n"
         f"ns = runpy.run_path({str(root / 'main.py')!r}, run_name='not_main')\n"
-        "ns['recover'](ns['HERE'])\n"
+        f"ns['recover'](ns['HERE'], lock_name='recover-test-{uuid.uuid4().hex}')\n"
         "import mediaforge\n"
         "print(mediaforge.__version__)\n"
     )
