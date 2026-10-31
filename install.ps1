@@ -1,9 +1,9 @@
 <#
 MediaForge installer for Windows 10/11. Open Windows PowerShell (Start, type powershell) and run:
 
-    irm is.gd/mediaforge | iex
+    irm is.gd/MediaForge | iex
 
-(is.gd/mediaforge is a short link to https://raw.githubusercontent.com/drunkgummyboy/Media-Forge/main/install.ps1)
+(is.gd/MediaForge is a short link to https://raw.githubusercontent.com/drunkgummyboy/Media-Forge/main/install.ps1)
 
 (Not via the Run dialog: security software blocks download commands started from Win+R, because
 scam pages ask people to paste them there.)

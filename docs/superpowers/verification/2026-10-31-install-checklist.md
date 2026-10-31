@@ -6,10 +6,10 @@ spare laptop or a virtual machine), and can only be done after MediaForge is on 
 
 ## 1. Install
 
-1. Make the short link: at is.gd, shorten
-   `https://raw.githubusercontent.com/drunkgummyboy/Media-Forge/main/install.ps1` with the
-   custom name `mediaforge`.
-2. Open **Windows PowerShell**, paste `irm is.gd/mediaforge | iex`, press Enter.
+1. The short link `https://is.gd/MediaForge` leads to
+   `https://raw.githubusercontent.com/drunkgummyboy/Media-Forge/main/install.ps1` (made
+   2026-10-31; is.gd links are case-sensitive).
+2. Open **Windows PowerShell**, paste `irm is.gd/MediaForge | iex`, press Enter.
 3. Expect: it installs Python if needed, then says **MediaForge is ready** and MediaForge opens.
 4. Check:
    - MediaForge is in the Start menu and on the desktop.

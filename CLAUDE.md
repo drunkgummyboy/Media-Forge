@@ -42,7 +42,7 @@ Design (from the owner's blueprint): async, modular, strongly typed.
 
 ## Install, update and release
 
-- Users install with `irm is.gd/mediaforge | iex` (`install.ps1`): Python 3.13 if missing,
+- Users install with `irm is.gd/MediaForge | iex` (`install.ps1`): Python 3.13 if missing,
   the app entries `main.py`, `pyproject.toml` and `src/` copied into
   `%LOCALAPPDATA%\Programs\MediaForge`, packages in its `.venv`, self-test, shortcuts,
   Installed-apps entry, right-click menu. `src/mediaforge/uninstall.ps1` undoes it.

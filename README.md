@@ -16,7 +16,7 @@ On Windows 10 or 11:
 2. Copy this line, paste it into the blue window (Ctrl+V or right-click) and press **Enter**:
 
    ```
-   irm is.gd/mediaforge | iex
+   irm is.gd/MediaForge | iex
    ```
 
 3. Wait until it says **MediaForge is ready**.
@@ -30,7 +30,7 @@ On first start, MediaForge asks for a free TMDB API key (from themoviedb.org) an
 settings of the old single-file MediaForge.
 
 Only paste commands like this from sources you trust. This one downloads MediaForge's installer,
-[`install.ps1`](install.ps1), from this page; you can read it first. `is.gd/mediaforge` is a short
+[`install.ps1`](install.ps1), from this page; you can read it first. `is.gd/MediaForge` is a short
 link to it; the same command with the full address is:
 
 ```
