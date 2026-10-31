@@ -8,6 +8,7 @@ from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.theme import DARK
 from mediaforge.ui.widgets.virtual_list import Row, VirtualList
 
+from helpers.colours import contrast
 from helpers.tk import pump
 
 
@@ -199,3 +200,23 @@ async def test_episode_lines_show_code_name_and_old_name(
     assert "S01E01" in texts and "Episode 0" in texts
     assert any(t.startswith("show.0.s01e01") for t in texts)
     assert "NEEDS YOU   ·   1" in texts
+
+
+async def test_coloured_codes_are_readable_in_dark(tk_root: DnDCTk, vlist: VirtualList) -> None:
+    def fills() -> dict[str, str]:
+        canvas = vlist.canvas
+        return {
+            canvas.itemcget(i, "text"): canvas.itemcget(i, "fill")
+            for i in canvas.find_all()
+            if canvas.type(i) == "text"
+        }
+
+    def readable(colour: str) -> bool:
+        return min(contrast(colour, DARK.main), contrast(colour, DARK.surface)) >= 4
+
+    vlist.set_rows(band_rows(1))  # an episode line's code
+    await pump(tk_root, 0.05)
+    assert readable(fills()["S01E01"])
+    vlist.set_rows(many_rows(1))  # the code inside a new name (the confirm window)
+    await pump(tk_root, 0.05)
+    assert readable(fills()["S01E00"])

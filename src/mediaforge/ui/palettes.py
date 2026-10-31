@@ -29,6 +29,7 @@ SLATE: dict[str, Pair] = {
     "LINK": ("#2D6390", "#5D8AA8"),
     "PLACEHOLDER": ("#DCE2E9", "gray20"),
     "SELECTED": ("#C9D8E8", "#4E6A85"),
+    "SELECTED_HOVER": ("#B8CADD", "#427839"),
     "CHIP": ("#E6EBF1", "gray15"),
 }
 
@@ -196,6 +197,7 @@ _FROM_SHADES: dict[str, str] = {
 _DERIVED: dict[str, Pair] = {
     "TAB_BG": ("bg", "bg"),
     "SELECTED": ("rowsel", "=accent"),
+    "SELECTED_HOVER": ("rowsel", "=hover"),
 }
 
 NEUTRAL = 0.02  # a saturation below this is a grey: no hue of its own to turn

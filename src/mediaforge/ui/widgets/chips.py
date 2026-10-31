@@ -42,7 +42,7 @@ class Chip(ctk.CTkButton):
         self.configure(
             text=("✓ " if self.value else "") + self._label,
             border_color=p.accent if self.value else p.border,
-            text_color=p.accent if self.value else p.muted,
+            text_color=p.link if self.value else p.muted,
         )
 
     def set(self, value: bool) -> None:

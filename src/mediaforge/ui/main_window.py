@@ -93,8 +93,8 @@ class MainShell(ctk.CTkFrame):
             values=list(KINDS.values()),
             command=self._kind_clicked,
             fg_color=p.raised,
-            selected_color=p.accent,
-            selected_hover_color=p.accent_hover,
+            selected_color=p.selected,
+            selected_hover_color=p.selected_hover,
             unselected_color=p.raised,
             unselected_hover_color=p.border,
             text_color=p.text,
@@ -132,7 +132,7 @@ class MainShell(ctk.CTkFrame):
                     height=18,
                     corner_radius=9,
                     fg_color=p.error,
-                    text_color="#FFFFFF",
+                    text_color=p.on_color,
                     font=font(10, "bold"),
                 )
             mark = tk.Frame(cell, bg=p.rail, height=3)

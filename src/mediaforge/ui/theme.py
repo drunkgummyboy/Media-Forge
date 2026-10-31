@@ -18,6 +18,8 @@ FONT_FAMILY = "Segoe UI"
 MONO_FAMILY = "Consolas"
 ASSETS = Path(__file__).resolve().parent.parent / "assets"
 ACCENTS: tuple[str, ...] = tuple(palettes.PALETTES)  # "slate" first
+# Calm tints behind a poster's initials when there is no picture (same in every look).
+TINTS = ("#5B3FA8", "#A8742B", "#1F8A55", "#B05A26", "#2F6F9A", "#8A3F6B", "#4D6B2F")
 
 
 @dataclass(frozen=True)
@@ -36,10 +38,12 @@ class Palette:
     error: str
     warning: str  # amber: something needs a look
     chip: str
-    selected: str  # the chosen part of a switch
+    selected: str  # the chosen part of a switch (light: a tint, so its text stays readable)
+    selected_hover: str
     link: str
     accent_hover: str
     edge: str  # outlined buttons
+    on_color: str = "#FFFFFF"  # text on a coloured fill (badges, initials)
 
 
 def accent_label(accent: str) -> str:
@@ -75,6 +79,7 @@ def _build(look: str, accent: str) -> Palette:
         warning=c("WARNING"),
         chip=c("CHIP"),
         selected=c("SELECTED"),
+        selected_hover=c("SELECTED_HOVER"),
         link=c("LINK"),
         accent_hover=c("ACCENT_HOVER"),
         edge=c("EDGE"),

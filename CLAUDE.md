@@ -59,6 +59,16 @@ Design (from the owner's blueprint): async, modular, strongly typed.
 - Commits pushed to GitHub use the author address `beau_spiessens@hotmail.com`
   (this repo's `user.email`), never the owner's Gmail address.
 
+## The look (1.2)
+
+- AirGrabber's family look: `ui/palettes.py` is a port of AirGrabber's accent palettes (Slate
+  default, ten accents); `ui/theme.py` turns them into the `Palette` every view takes.
+  Light/dark and the accent are chosen at start (Settings › Looks; a change takes a restart).
+  No `#rrggbb` literals in `ui/` outside those two and `bootstrap_window.py` (a test checks).
+- The top band (`MainShell`) has the Series | Movies switch; the Inbox (`QueueView`, view key
+  `"queue"`) draws show and movie bands on the fast canvas list (`widgets/virtual_list.py`),
+  pictures from `ui/images.py`. History groups run bands by day; Settings is in tabs.
+
 ## Things learned the hard way
 
 - Tk on Windows: never mark a pop-up `transient()` (it crashed Tk once destroyed

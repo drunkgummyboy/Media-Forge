@@ -11,6 +11,7 @@ from mediaforge.ui.dnd_root import DnDCTk
 from mediaforge.ui.main_window import MainShell, save_window_state
 from mediaforge.ui.theme import DARK, LIGHT, palette_for
 
+from helpers.colours import contrast
 from helpers.tk import pump
 
 
@@ -265,3 +266,31 @@ async def test_page_names_sit_close_together(tk_root: DnDCTk, shell: MainShell) 
     for left, right in zip(buttons, buttons[1:], strict=False):
         gap = right.winfo_rootx() - (left.winfo_rootx() + left.winfo_width())
         assert gap < 40, gap
+
+
+async def test_a_switchs_chosen_part_is_readable_in_light(
+    tk_root: DnDCTk, services: Services
+) -> None:
+    import customtkinter as ctk
+
+    light = palette_for("Light", "teal")
+    s = MainShell(tk_root, services, light)
+    s.pack(fill="both", expand=True)
+    await pump(tk_root, 0.1)
+    try:
+        switches: list[ctk.CTkSegmentedButton] = []
+        stack: list[object] = [s]
+        while stack:
+            widget = stack.pop()
+            if isinstance(widget, ctk.CTkSegmentedButton):
+                switches.append(widget)
+            stack.extend(widget.winfo_children())  # type: ignore[attr-defined]
+        # The Series | Movies switch, the Settings tabs and its light/dark switch at least.
+        assert len(switches) >= 3
+        for switch in switches:
+            text, chosen = switch.cget("text_color"), switch.cget("selected_color")
+            assert contrast(text, chosen) >= 4.5, (text, chosen)
+            # No grey frame from customtkinter's own theme around the parts.
+            assert switch.cget("fg_color") == switch.cget("unselected_color"), switch
+    finally:
+        s.destroy()

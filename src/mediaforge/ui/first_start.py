@@ -121,7 +121,7 @@ class FirstStart(ctk.CTkToplevel):
             width=10,
             fg_color="transparent",
             hover_color=p.raised,
-            text_color=p.accent,
+            text_color=p.link,
             font=font(11),
             command=lambda: os.startfile(TMDB_KEY_PAGE),  # type: ignore[attr-defined]
         ).pack(anchor="w")

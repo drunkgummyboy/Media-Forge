@@ -22,12 +22,12 @@ from mediaforge.platform.bootstrap import (
 )
 
 _ICON_FILE = Path(__file__).resolve().parent.parent / "assets" / "MediaForge.ico"
-# Copies of DARK tokens (ui/theme.py needs customtkinter).
-_BG = "#16181d"
-_SURFACE = "#262a33"
-_ACCENT = "#f2a33a"
-_TEXT = "#e8eaed"
-_MUTED = "#8b93a1"
+# Copies of the dark Slate palette's colours (ui/theme.py needs customtkinter).
+_BG = "#161616"
+_SURFACE = "#262626"
+_ACCENT = "#4E6A85"
+_TEXT = "#FFFFFF"
+_MUTED = "#A4B2C6"
 _POLL_MS = 150
 _STATUS_CHARS = 64
 

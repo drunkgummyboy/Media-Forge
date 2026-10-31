@@ -163,7 +163,7 @@ async def test_first_start_imports_legacy_and_marks_done(
 async def test_edited_preset_is_highlighted(view: SettingsView) -> None:
     buttons = view.preset_list.winfo_children()
     assert view.editing == "Auto"
-    assert buttons[0].cget("text_color") == DARK.accent  # type: ignore[union-attr]
+    assert buttons[0].cget("text_color") == DARK.link  # type: ignore[union-attr]
 
 
 async def test_settings_shows_version_and_offers_update(

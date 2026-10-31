@@ -12,9 +12,9 @@ from typing import Any, Literal
 import customtkinter as ctk
 from pydantic import BaseModel
 
-from mediaforge.ui.theme import FONT_FAMILY, MONO_FAMILY, Palette
+from mediaforge.ui.theme import FONT_FAMILY, MONO_FAMILY, TINTS, Palette
 
-THUMB_COLOURS = ("#5b3fa8", "#a8742b", "#1f8a55", "#b05a26", "#2f6f9a", "#8a3f6b", "#4d6b2f")
+THUMB_COLOURS = TINTS
 
 
 class Row(BaseModel):
@@ -33,7 +33,7 @@ class Row(BaseModel):
     backdrop: str | None = None  # a band's backdrop (TMDB path)
     actions: tuple[tuple[str, str], ...] = ()  # a band's buttons: (id, label), the last filled
     note: str = ""  # a band's quiet text on the right (a time)
-    code: str = ""  # an episode line's code ("S04E03"), in the accent colour
+    code: str = ""  # an episode line's code ("S04E03"), in the link colour (readable accent)
     faint: str = ""  # a line's old file name, faint on the right
 
 
@@ -111,8 +111,8 @@ class VirtualList(ctk.CTkFrame):
         self._status_style: dict[str, tuple[str, str]] = {
             "looking_up": ("…", palette.muted),
             "ready": ("●", palette.success),
-            "needs_choice": ("?", palette.accent),
-            "working": ("⟳", palette.accent),
+            "needs_choice": ("?", palette.link),
+            "working": ("⟳", palette.link),
             "done": ("✓", palette.success),
             "error": ("!", palette.error),
             "skipped": ("–", palette.muted),
@@ -321,7 +321,7 @@ class VirtualList(ctk.CTkFrame):
                 px + poster_w / 2,
                 py + poster_h / 2,
                 text=initials,
-                fill="#FFFFFF",
+                fill=self.palette.on_color,
                 font=self._thumb_font,
                 tags=("band-initials",),
             )
@@ -406,7 +406,7 @@ class VirtualList(ctk.CTkFrame):
             )
             right -= faint_w + round(16 * self._get_widget_scaling())
         if row.code:
-            c.create_text(x, middle, text=row.code, anchor="w", fill=p.accent, font=self._code_font)
+            c.create_text(x, middle, text=row.code, anchor="w", fill=p.link, font=self._code_font)
             x += max(self._code_font.measure("S00E00-E00"), self._code_font.measure(row.code))
             x += round(10 * self._get_widget_scaling())
         c.create_text(
@@ -452,7 +452,7 @@ class VirtualList(ctk.CTkFrame):
                 tx + thumb_w / 2,
                 ty + thumb_h / 2,
                 text=initials,
-                fill="#ffffff",
+                fill=self.palette.on_color,
                 font=self._thumb_font,
             )
             tx += thumb_w + 10
@@ -466,7 +466,7 @@ class VirtualList(ctk.CTkFrame):
             start, end = row.highlight
             for part, colour in (
                 (title[:start], p.text),
-                (title[start:end], p.accent),
+                (title[start:end], p.link),
                 (title[end:], p.text),
             ):
                 if part:

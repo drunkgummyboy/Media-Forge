@@ -4,7 +4,8 @@ Clean names for your video files.
 
 A Windows desktop app that renames messy release-scene video filenames into clean, standard names
 and folders (`Dune Part Two (2024).mkv`, `VisionQuest/Season 01/VisionQuest - S01E02 - Theseus.mkv`),
-using TMDB for official titles, years, episode names and posters, and yt-dlp for trailers. You see
+using TMDB for official titles, years, episode names and posters, and yt-dlp for trailers. It shares
+AirGrabber's look: light or dark, ten accent colours, shows and movies in bands. You see
 every new name before anything changes, and you can undo any of your last 50 runs, whole or file by
 file.
 
