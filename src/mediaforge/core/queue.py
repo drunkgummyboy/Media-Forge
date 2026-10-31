@@ -31,6 +31,7 @@ class ItemStatus(StrEnum):
     DONE = "done"
     ERROR = "error"
     SKIPPED = "skipped"
+    HELD = "held"  # a watched download waiting for the owner, the reason in `message`
 
 
 _FINISHED = frozenset({ItemStatus.DONE, ItemStatus.SKIPPED})
@@ -54,6 +55,8 @@ class QueueItem:
     status: ItemStatus = ItemStatus.LOOKING_UP
     message: str = ""
     finished_at: float | None = None  # when a run renamed it or found it already right
+    watched: Path | None = None  # the watched download folder it came from
+    run_id: int | None = None  # the run that renamed it
 
     @property
     def root(self) -> Path:
@@ -199,6 +202,71 @@ class Queue:
         item.status = ItemStatus.NEEDS_CHOICE if uncertain else ItemStatus.READY
         self._on_change(QueueEvent(kind="updated", ids=(item.id,)))
 
+    async def add_watched(self, files: Sequence[tuple[Path, Path]]) -> list[int]:
+        """Finished downloads, as (file, watched folder) pairs; returns the ids of new items.
+
+        They are parsed without the window's preset hint: a download's kind comes from its name.
+        """
+        async with self._adding:
+            generation = self._generation
+            known = {_key(i.path) for i in self.items}
+            fresh: dict[str, tuple[Path, Path]] = {}
+            for file, root in files:
+                if _key(file) not in known:
+                    fresh.setdefault(_key(file), (file, root))
+            if not fresh:
+                return []
+            entries = list(fresh.values())
+            parsed = await _parse_all([f.name for f, _ in entries], TypeHint.AUTO)
+            if generation != self._generation:
+                return []
+            new_items = [
+                QueueItem(next(self._ids), file, None, p, watched=root)
+                for (file, root), p in zip(entries, parsed, strict=True)
+            ]
+            self.items.extend(new_items)
+            self._on_change(QueueEvent(kind="added", ids=tuple(i.id for i in new_items)))
+            for item in new_items:
+                self._start_lookup(item)
+            return [i.id for i in new_items]
+
+    def hold(self, item_id: int, reason: str) -> None:
+        """A watched download waits for the owner, for `reason`."""
+        item = self.get(item_id)
+        if item is None:
+            return
+        item.status = ItemStatus.HELD
+        item.message = reason
+        self._on_change(QueueEvent(kind="updated", ids=(item_id,)))
+
+    def purge_finished(self, before: float) -> int:
+        """Drop items renamed before `before` (yesterday's "Done today")."""
+        old = [
+            i
+            for i in self.items
+            if i.status in _FINISHED and i.finished_at is not None and i.finished_at < before
+        ]
+        return self._drop(old)
+
+    def forget_watched(self, present: set[str]) -> int:
+        """Drop pending watched items whose file (by path key) is no longer there."""
+        gone = [
+            i
+            for i in self.items
+            if i.watched is not None and i.status not in _FINISHED and _key(i.path) not in present
+        ]
+        return self._drop(gone)
+
+    def _drop(self, items: Sequence[QueueItem]) -> int:
+        for item in items:
+            self.items.remove(item)
+            task = self._tasks.pop(item.id, None)
+            if task:
+                task.cancel()
+        if items:
+            self._on_change(QueueEvent(kind="removed", ids=tuple(i.id for i in items)))
+        return len(items)
+
     def remove(self, item_id: int) -> None:
         item = self.get(item_id)
         if item is None:
@@ -227,7 +295,8 @@ class Queue:
         if hint is self.hint:
             return
         self.hint = hint
-        todo = self.pending()  # renamed files keep their result
+        # Renamed files keep their result; watched downloads are always parsed without a hint.
+        todo = [i for i in self.pending() if i.watched is None]
         parsed = await _parse_all([i.path.name for i in todo], hint)
         for item, p in zip(todo, parsed, strict=True):
             if self.get(item.id) is not item or item.status in _FINISHED:
@@ -269,11 +338,12 @@ class Queue:
         """Items not renamed yet."""
         return [i for i in self.items if i.status not in _FINISHED]
 
-    def mark_finished(self, item_id: int, new_path: Path | None) -> None:
+    def mark_finished(self, item_id: int, new_path: Path | None, run_id: int | None = None) -> None:
         """A run renamed this file (new_path) or found it already right (None)."""
         item = self.get(item_id)
         if item is None:
             return
+        item.run_id = run_id
         if new_path is not None:
             item.path = new_path
             item.status = ItemStatus.DONE
@@ -300,7 +370,15 @@ class Queue:
         ]
 
     async def rescan(self, recursive: bool) -> None:
+        """Scan the dropped folders and files again; watched downloads stay as they are."""
         folders = list(self._folders)
-        loose = [i.path for i in self.items if i.dropped_folder is None]
+        loose = [i.path for i in self.items if i.dropped_folder is None and i.watched is None]
+        kept = [i for i in self.items if i.watched is not None]
         self.clear()
+        if kept:
+            self.items.extend(kept)
+            self._on_change(QueueEvent(kind="added", ids=tuple(i.id for i in kept)))
+            for item in kept:
+                if item.status is ItemStatus.LOOKING_UP:  # its lookup was cancelled by clear()
+                    self._start_lookup(item)
         await self.add_paths([*folders, *loose], recursive)

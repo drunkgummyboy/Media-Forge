@@ -309,3 +309,100 @@ async def test_finished_items_stay_finished(tmp_path: Path) -> None:
     await q.choose_match(second.id, TmdbResult(id=1, title="Show"))
     assert first.status is ItemStatus.DONE
     assert [i.id for i in q.pending()] == [second.id]
+
+
+# --- watched downloads (1.3) ------------------------------------------------------------------
+
+
+async def test_watched_files_are_parsed_without_the_presets_hint(tmp_path: Path) -> None:
+    q, _ = make_queue()
+    await q.set_hint(TypeHint.TV)  # the window's preset is a Series one
+    file = touch(tmp_path / "Dune.2021.mkv")
+    [item_id] = await q.add_watched([(file, tmp_path)])
+    await q.wait_idle()
+    item = q.get(item_id)
+    assert item is not None and item.watched == tmp_path
+    assert item.parsed.kind is MediaKind.MOVIE
+    assert item.root == tmp_path  # where a dropped file would be renamed; unused for watched ones
+
+
+async def test_set_hint_leaves_watched_files_alone(tmp_path: Path) -> None:
+    q, _ = make_queue()
+    [watched] = await q.add_watched([(touch(tmp_path / "w" / "Dune.2021.mkv"), tmp_path / "w")])
+    await q.add_paths([touch(tmp_path / "d" / "Heat.1995.mkv")], recursive=False)
+    await q.wait_idle()
+    await q.set_hint(TypeHint.TV)
+    await q.wait_idle()
+    kinds = {i.path.name: i.parsed.kind for i in q.items}
+    assert kinds == {"Dune.2021.mkv": MediaKind.MOVIE, "Heat.1995.mkv": MediaKind.EPISODE}
+    assert q.get(watched) is not None
+
+
+async def test_a_watched_file_is_added_once(tmp_path: Path) -> None:
+    q, _ = make_queue()
+    file = touch(tmp_path / "Show.S01E01.mkv")
+    assert len(await q.add_watched([(file, tmp_path)])) == 1
+    assert await q.add_watched([(file, tmp_path)]) == []
+    await q.add_paths([file], recursive=False)  # dropped on the window as well
+    assert len(q.items) == 1
+
+
+async def test_hold_keeps_a_reason(tmp_path: Path) -> None:
+    q, events = make_queue()
+    [item_id] = await q.add_watched([(touch(tmp_path / "Dune.mkv"), tmp_path)])
+    await q.wait_idle()
+    q.hold(item_id, "No year in the name: is it a movie?")
+    item = q.get(item_id)
+    assert item is not None and item.status is ItemStatus.HELD
+    assert item.message == "No year in the name: is it a movie?"
+    assert events[-1] == QueueEvent(kind="updated", ids=(item_id,))
+    assert item in q.pending()  # not renamed yet
+
+
+async def test_purge_finished_drops_yesterdays_done(tmp_path: Path) -> None:
+    q, events = make_queue()
+    ids = await q.add_watched([(touch(tmp_path / f"S01E0{n}.mkv"), tmp_path) for n in (1, 2, 3)])
+    await q.wait_idle()
+    q.mark_finished(ids[0], tmp_path / "x1.mkv")
+    q.mark_finished(ids[1], tmp_path / "x2.mkv")
+    old, new = (q.get(i) for i in ids[:2])
+    assert old is not None and new is not None
+    old.finished_at = 1000.0
+    new.finished_at = 5000.0
+    assert q.purge_finished(before=2000.0) == 1
+    assert [i.id for i in q.items] == ids[1:]  # yesterday's done went; today's and pending stay
+    assert events[-1] == QueueEvent(kind="removed", ids=(ids[0],))
+
+
+async def test_forget_watched_drops_files_that_went_away(tmp_path: Path) -> None:
+    q, _ = make_queue()
+    a, b = touch(tmp_path / "a.mkv"), touch(tmp_path / "b.mkv")
+    ids = await q.add_watched([(a, tmp_path), (b, tmp_path)])
+    dropped = await q.add_paths([touch(tmp_path / "other" / "c.mkv")], recursive=False)
+    await q.wait_idle()
+    assert dropped == 1
+    present = {queue_module._key(a)}  # pyright: ignore[reportPrivateUsage]
+    assert q.forget_watched(present) == 1
+    assert {i.path.name for i in q.items} == {"a.mkv", "c.mkv"}  # dropped files are not watched
+    assert q.get(ids[0]) is not None
+
+
+async def test_mark_finished_keeps_the_run(tmp_path: Path) -> None:
+    q, _ = make_queue()
+    [item_id] = await q.add_watched([(touch(tmp_path / "a.mkv"), tmp_path)])
+    await q.wait_idle()
+    q.mark_finished(item_id, tmp_path / "b.mkv", run_id=7)
+    item = q.get(item_id)
+    assert item is not None and item.run_id == 7 and item.status is ItemStatus.DONE
+
+
+async def test_rescan_keeps_watched_files(tmp_path: Path) -> None:
+    q, _ = make_queue()
+    await q.add_watched([(touch(tmp_path / "w" / "a.mkv"), tmp_path / "w")])
+    touch(tmp_path / "d" / "b.mkv")
+    await q.add_paths([tmp_path / "d"], recursive=True)
+    await q.wait_idle()
+    await q.rescan(recursive=True)
+    await q.wait_idle()
+    assert sorted(i.path.name for i in q.items) == ["a.mkv", "b.mkv"]
+    assert [i.watched for i in q.items if i.path.name == "a.mkv"] == [tmp_path / "w"]
