@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from mediaforge.platform.identity import set_process_app_id
 from mediaforge.platform.instance_name import instance_running
 from mediaforge.platform.paths import app_paths
 from mediaforge.platform.update_files import installed_version, is_development_copy
@@ -53,6 +54,7 @@ class LaunchHooks:
     instance_running: Callable[[], bool] = lambda: False
     report_crash: Callable[[BaseException], None] = lambda exc: None
     report_unreachable: Callable[[bool], None] = lambda refused: None
+    set_app_id: Callable[[], object] = lambda: None
 
 
 def main(
@@ -63,6 +65,8 @@ def main(
     handover_s: float = HANDOVER_S,
 ) -> int:
     steps = hooks or default_hooks(install_dir)
+    # Its own taskbar button, name and icon, before any window (the package check's included).
+    steps.set_app_id()
     deadline = time.monotonic() + handover_s
     if not any(arg in _ACTIONS for arg in argv) and steps.instance_running():
         # Another MediaForge holds the lock: hand the files over, without a package check (it
@@ -297,6 +301,7 @@ def default_hooks(install_dir: Path) -> LaunchHooks:
         instance_running=instance_running,
         report_crash=report_crash,
         report_unreachable=report_unreachable,
+        set_app_id=set_process_app_id,
     )
 
 

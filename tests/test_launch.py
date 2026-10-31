@@ -338,3 +338,11 @@ def test_default_unreachable_message_says_what_to_do(monkeypatch: pytest.MonkeyP
     launch.report_unreachable(False)
     assert "administrator" in shown[0] and "restart" in shown[0].lower()
     assert "Task Manager" in shown[1] or "restart" in shown[1].lower()
+
+
+def test_the_app_id_is_set_before_anything_else(install_dir: Path) -> None:
+    calls: list[str] = []
+    steps = hooks(calls)
+    steps.set_app_id = lambda: calls.append("app id")
+    launch.main([], install_dir=install_dir, hooks=steps)
+    assert calls[:2] == ["app id", "requirements"]

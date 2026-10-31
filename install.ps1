@@ -36,6 +36,8 @@ $ArchiveUrl = "https://codeload.github.com/$Repo/zip/refs/heads/$Branch"
 $AppEntries = @('main.py', 'pyproject.toml', 'src')    # keep in step with platform/update_files.py
 $IconPath = 'src\mediaforge\assets\MediaForge.ico'     # keep in step with platform/install_info.py
 $Uninstaller = 'src\mediaforge\uninstall.ps1'          # keep in step with platform/install_info.py
+$AppId = 'drunkgummyboy.MediaForge'                    # keep in step with platform/identity.py
+$AppIdHelper = 'src\mediaforge\shortcut_app_id.cs'
 $PythonFallback = '3.13.15'                            # python.org build used when winget can't
 # winget for PCs without it: App Installer (which brings winget.exe) from winget's own release, plus
 # the frameworks that release ships in DesktopAppInstaller_Dependencies.zip. Pinned, so the two
@@ -329,6 +331,23 @@ function New-Shortcut([string]$Path, [string]$PythonW) {
     $link.IconLocation = (Join-Path $InstallDir $IconPath) + ',0'
     $link.Description = 'Rename and organise video files'
     $link.Save()
+    Set-ShortcutAppId $Path
+}
+
+function Set-ShortcutAppId([string]$Path) {
+    # MediaForge's AppUserModelID (platform/identity.py) on the shortcut, so Windows ties its
+    # taskbar button to this shortcut and not to another program that runs the same pythonw.exe.
+    # The C# helper comes with the app just installed, compiled once per run. Optional: without
+    # it the shortcut still works, and MediaForge sets the ID on itself when it starts.
+    try {
+        if (-not ('MediaForge.ShortcutAppId' -as [type])) {
+            $helper = (Resolve-Path -LiteralPath (Join-Path $InstallDir $AppIdHelper)).ProviderPath
+            Add-Type -TypeDefinition ([IO.File]::ReadAllText($helper))
+        }
+        [MediaForge.ShortcutAppId]::Set($Path, $AppId)
+    } catch {
+        Write-Verbose ('No AppUserModelID on ' + $Path + ': ' + $_.Exception.Message)
+    }
 }
 
 function Register-Uninstaller {

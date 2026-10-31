@@ -157,3 +157,28 @@ def test_installer_never_starts_mediaforge_with_administrator_rights() -> None:
     assert result.stdout.split() == ["direct", "explorer", "none"], result.stdout + result.stderr
     code = INSTALL.read_text(encoding="ascii")
     assert "Get-LaunchPlan (Test-Elevated)" in code
+
+
+def test_installer_shortcuts_carry_mediaforges_app_id(tmp_path: Path) -> None:
+    # Without the ID on the shortcut, Windows can't tie MediaForge's taskbar button to it.
+    from mediaforge.platform.identity import APP_USER_MODEL_ID
+
+    link = tmp_path / "MediaForge test.lnk"
+    script = (
+        "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{INSTALL}', [ref]$null, [ref]$null); "
+        "$wanted = @('$IconPath', '$AppId', '$AppIdHelper'); "
+        "foreach ($st in $ast.EndBlock.Statements) { "
+        "  $isConstant = $st -is [System.Management.Automation.Language.AssignmentStatementAst] "
+        "-and $wanted -contains $st.Left.Extent.Text; "
+        "  $isFunction = $st -is [System.Management.Automation.Language.FunctionDefinitionAst] "
+        "-and @('New-Shortcut', 'Set-ShortcutAppId') -contains $st.Name; "
+        "  if ($isConstant -or $isFunction) { . ([scriptblock]::Create($st.Extent.Text)) } }; "
+        f"$InstallDir = '{ROOT}'; "
+        f"New-Shortcut '{link}' 'C:/Windows/notepad.exe'; "
+        f"[MediaForge.ShortcutAppId]::Get('{link}')"
+    )
+    result = run_ps(script)
+    assert result.stdout.strip().splitlines()[-1:] == [APP_USER_MODEL_ID], (
+        result.stdout + result.stderr
+    )
