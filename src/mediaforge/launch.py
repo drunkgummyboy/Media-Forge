@@ -52,6 +52,7 @@ class LaunchHooks:
     menu: Callable[[bool], int] = lambda install: 0  # --install-menu / --remove-menu
     instance_running: Callable[[], bool] = lambda: False
     report_crash: Callable[[BaseException], None] = lambda exc: None
+    report_unreachable: Callable[[bool], None] = lambda refused: None
 
 
 def main(
@@ -90,10 +91,15 @@ def main(
     msg = _message(args, InstanceMessage)
     # Two launches can find the lock free at once: the one that loses hands over.
     while (primary := steps.try_become_primary(paths.instance_key_file)) is None:
-        if steps.send_to_primary(msg, paths.instance_key_file):
-            return 0
+        try:
+            if steps.send_to_primary(msg, paths.instance_key_file):
+                return 0
+        except PermissionError:
+            steps.report_unreachable(True)
+            return 1
         if time.monotonic() >= deadline:
             log.warning("No MediaForge window took the files and none could be opened")
+            steps.report_unreachable(False)
             return 1
     restart = False
     crash: BaseException | None = None
@@ -138,12 +144,17 @@ def _hand_over_while_running(
     msg = _message(parse_args(list(argv)), InstanceMessage)
     key_file = app_paths().instance_key_file
     while True:
-        if steps.send_to_primary(msg, key_file):
-            return True
+        try:
+            if steps.send_to_primary(msg, key_file):
+                return True
+        except PermissionError:
+            steps.report_unreachable(True)
+            return False
         if not steps.instance_running():
             return None
         if time.monotonic() >= deadline:
             log.warning("The open MediaForge didn't take the files")
+            steps.report_unreachable(False)
             return False
 
 
@@ -165,6 +176,23 @@ def report_crash(exc: BaseException) -> None:
         "(it repairs MediaForge and keeps your settings), or send that file to whoever "
         "helped you set it up."
     )
+
+
+def report_unreachable(refused: bool) -> None:
+    """The open MediaForge can't take this launch's files: say why, and what helps."""
+    if refused:
+        _show_error(
+            "MediaForge is already open, but it was started with administrator rights, so it "
+            "can't be reached from here.\n\n"
+            "Close that MediaForge, or restart the computer, and then open MediaForge again "
+            "from the Start menu or the desktop."
+        )
+    else:
+        _show_error(
+            "MediaForge is already open but isn't answering.\n\n"
+            "Wait a moment and try again. If it keeps happening, end MediaForge in Task Manager "
+            "(it shows as pythonw) or restart the computer."
+        )
 
 
 def _show_error(text: str) -> None:
@@ -268,6 +296,7 @@ def default_hooks(install_dir: Path) -> LaunchHooks:
         menu=menu,
         instance_running=instance_running,
         report_crash=report_crash,
+        report_unreachable=report_unreachable,
     )
 
 

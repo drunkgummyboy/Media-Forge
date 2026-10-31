@@ -159,6 +159,8 @@ def send_to_primary(
             with Client(pipe_address(name), family="AF_PIPE", authkey=key) as conn:
                 conn.send(msg.model_dump(mode="json"))
             return True
+        except PermissionError:
+            raise  # it runs with administrator rights and refuses us: waiting can't help
         except Exception:  # not listening yet, busy, or the key doesn't match
             if time.monotonic() >= deadline:
                 return False

@@ -2,6 +2,8 @@ import threading
 import uuid
 from pathlib import Path
 
+import pytest
+
 from mediaforge.platform.single_instance import (
     ConfirmBatcher,
     InstanceMessage,
@@ -133,3 +135,23 @@ def test_batcher_groups_by_preset_after_quiet_period() -> None:
     assert batches == [("Auto", [Path("a.mkv"), Path("b.mkv")]), ("Series (Flat)", [Path("c.mkv")])]
     b.flush_due(now=20.0)
     assert len(batches) == 2
+
+
+def test_send_stops_at_once_when_the_window_refuses(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # A MediaForge running with administrator rights refuses normal launches ("access denied"):
+    # retrying for seconds can't help.
+    import time
+
+    from mediaforge.platform import single_instance
+
+    def refuse(*args: object, **kwargs: object) -> object:
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(single_instance, "Client", refuse)
+    msg = single_instance.InstanceMessage(paths=[], preset=None, confirm=False)
+    started = time.monotonic()
+    with pytest.raises(PermissionError):
+        single_instance.send_to_primary(msg, tmp_path / "key", timeout_s=5)
+    assert time.monotonic() - started < 1

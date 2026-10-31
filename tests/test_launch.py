@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -36,6 +37,7 @@ def hooks(
     running: bool = False,
     sends_ok: bool = True,
     lock_free_after: int = 0,
+    refused: bool = False,
 ) -> LaunchHooks:
     """Fakes for every step. `running`: another MediaForge holds the lock; `sends_ok`: it
     takes hand-overs; `lock_free_after`: that window lets go of the lock after so many
@@ -58,6 +60,8 @@ def hooks(
     def send(msg: Any, key: Path) -> bool:
         calls.append("send")
         sends[0] += 1
+        if refused:
+            raise PermissionError(13, "Access is denied")
         return sends_ok
 
     def run_app(args: Any, p: Any) -> Any:
@@ -81,6 +85,7 @@ def hooks(
         self_test=lambda: 0,
         instance_running=lock_held,
         report_crash=lambda exc: calls.append(f"crash {exc}"),
+        report_unreachable=lambda refused: calls.append(f"unreachable refused={refused}"),
     )
 
 
@@ -176,7 +181,8 @@ def test_launch_gives_up_after_the_deadline(install_dir: Path) -> None:
     calls: list[str] = []
     steps = hooks(calls, running=True, sends_ok=False)
     assert launch.main(["a.mkv"], install_dir=install_dir, hooks=steps, handover_s=0.3) == 1
-    assert set(calls) == {"send"}  # no package check, and pip never runs next to that window
+    # No package check, and pip never runs next to that window; giving up is said, not silent.
+    assert set(calls) == {"send", "unreachable refused=False"}
 
 
 def test_installed_apps_entry_is_refreshed_even_without_a_staged_update(
@@ -305,3 +311,30 @@ def test_power_cut_repair_waits_while_another_mediaforge_holds_the_lock(tmp_path
         assert (root / ".update" / "old").is_dir()
     finally:
         primary.close()
+
+
+def test_a_mediaforge_running_as_administrator_is_reported_at_once(install_dir: Path) -> None:
+    # A MediaForge started with administrator rights refuses normal launches: say so right
+    # away instead of waiting a minute and then doing nothing.
+    calls: list[str] = []
+    steps = hooks(calls, running=True, refused=True)
+    started = time.monotonic()
+    assert launch.main(["a.mkv"], install_dir=install_dir, hooks=steps) == 1
+    assert time.monotonic() - started < 5
+    assert calls == ["send", "unreachable refused=True"]
+
+
+def test_a_window_that_never_answers_is_reported(install_dir: Path) -> None:
+    calls: list[str] = []
+    steps = hooks(calls, running=True, sends_ok=False)
+    assert launch.main(["a.mkv"], install_dir=install_dir, hooks=steps, handover_s=0.3) == 1
+    assert calls[-1] == "unreachable refused=False"
+
+
+def test_default_unreachable_message_says_what_to_do(monkeypatch: pytest.MonkeyPatch) -> None:
+    shown: list[str] = []
+    monkeypatch.setattr(launch, "_show_error", shown.append)
+    launch.report_unreachable(True)
+    launch.report_unreachable(False)
+    assert "administrator" in shown[0] and "restart" in shown[0].lower()
+    assert "Task Manager" in shown[1] or "restart" in shown[1].lower()
