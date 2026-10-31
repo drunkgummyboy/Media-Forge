@@ -82,7 +82,7 @@ class SettingsView(ctk.CTkFrame):
         ctk.CTkLabel(head, text="Settings", font=font(16, "bold"), text_color=palette.text).pack(
             side="left"
         )
-        self.tab_names = ["Naming", "TMDB", "Right-click menu", "Looks", "About"]
+        self.tab_names = ["Library", "Naming", "TMDB", "Right-click menu", "Looks", "About"]
         self.tabs = ctk.CTkTabview(
             self,
             fg_color=palette.main,
@@ -96,6 +96,7 @@ class SettingsView(ctk.CTkFrame):
         )
         self.tabs.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         builders: dict[str, tuple[Callable[[], None], ...]] = {
+            "Library": (self._build_library,),
             "Naming": (self._build_presets, self._build_matches),
             "TMDB": (self._build_tmdb,),
             "Right-click menu": (self._build_menu,),
@@ -111,7 +112,12 @@ class SettingsView(ctk.CTkFrame):
             self.body.pack(fill="both", expand=True)
             for build in builders[name]:
                 build()
-        self.tabs.set("Naming")
+        self.tabs.set("Library")
+
+    def _build_library(self) -> None:
+        from mediaforge.ui.library_tab import LibraryTab
+
+        self.library = LibraryTab(self)
 
     # --- plumbing --------------------------------------------------------------------------
 
@@ -180,6 +186,7 @@ class SettingsView(ctk.CTkFrame):
         self._fill_preset_list()
         self._load_editor()
         self._fill_menu_checks(settings.context_menu_presets)
+        self.library.fill(settings, [p.name for p in self.presets])
         self.menu_label.configure(text=self.menu_status())
         if settings.auto_update:
             self.auto_switch.select()

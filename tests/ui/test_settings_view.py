@@ -218,8 +218,8 @@ async def test_all_ticked_saves_empty_list(
 
 
 async def test_settings_has_its_tabs(view: SettingsView) -> None:
-    assert view.tab_names == ["Naming", "TMDB", "Right-click menu", "Looks", "About"]
-    assert view.tabs.get() == "Naming"
+    assert view.tab_names == ["Library", "Naming", "TMDB", "Right-click menu", "Looks", "About"]
+    assert view.tabs.get() == "Library"
     # Each section lives in its tab, under the same names as before.
     assert view.theme.winfo_toplevel() is view.winfo_toplevel()
 
@@ -247,3 +247,88 @@ async def test_about_has_a_support_link(
     assert view.donate_button.cget("text") == "♥ Support MediaForge"
     view.donate_button.invoke()
     assert opened == ["https://ko-fi.com/airgrabber"]
+
+
+# --- Settings › Library (1.3) --------------------------------------------------------------------
+
+
+def folders(root: Path) -> tuple[Path, Path, Path]:
+    made = (root / "Downloads", root / "Series", root / "Movies")
+    for folder in made:
+        folder.mkdir(parents=True, exist_ok=True)
+    return made
+
+
+async def choose_all(view: SettingsView, root: Path) -> tuple[Path, Path, Path]:
+    downloads, series, movies = folders(root)
+    tab = view.library
+    tab.ask_folder = lambda title: str(downloads)
+    await tab.add_watch_folder()
+    tab.ask_folder = lambda title: str(series)
+    await tab.choose_library("series")
+    tab.ask_folder = lambda title: str(movies)
+    await tab.choose_library("movies")
+    return downloads, series, movies
+
+
+async def test_library_folders_are_saved(
+    view: SettingsView, services: Services, tmp_path: Path
+) -> None:
+    reconfigured: list[int] = []
+    services.auto.reconfigure = lambda: reconfigured.append(1)  # type: ignore[method-assign]
+    downloads, series, movies = await choose_all(view, tmp_path)
+    saved = await services.settings.load()
+    assert saved.watch_folders == [str(downloads)]
+    assert (saved.series_folder, saved.movies_folder) == (str(series), str(movies))
+    assert services.app_settings.series_folder == str(series)
+    assert len(reconfigured) == 3  # every change tells the renamer at once
+    await view.library.remove_watch_folder(str(downloads))
+    assert (await services.settings.load()).watch_folders == []
+
+
+async def test_rename_on_its_own_waits_for_the_folders(view: SettingsView) -> None:
+    tab = view.library
+    assert tab.mode.cget("state") == "disabled"
+    assert "Choose a download folder to watch." in tab.problems_label.cget("text")
+
+
+async def test_on_goes_through_trial_first(
+    view: SettingsView, services: Services, tmp_path: Path
+) -> None:
+    await choose_all(view, tmp_path)
+    tab = view.library
+    assert tab.mode.cget("state") == "normal"
+    await tab.set_mode("On")
+    assert (await services.settings.load()).automatic == "trial"
+    assert tab.mode.get() == "Trial"
+    assert tab.note_label.cget("text").startswith("Trial first:")
+    await tab.set_mode("On")
+    assert (await services.settings.load()).automatic == "on"
+    await tab.set_mode("Off")
+    assert services.app_settings.automatic == "off"
+
+
+async def test_overlapping_folders_are_refused_with_the_reason(
+    view: SettingsView, tmp_path: Path
+) -> None:
+    downloads, _, _ = await choose_all(view, tmp_path)
+    tab = view.library
+    tab.ask_folder = lambda title: str(downloads)  # the library is the download folder
+    await tab.choose_library("series")
+    assert tab.mode.cget("state") == "disabled"
+    assert "can't be inside a library folder" in tab.problems_label.cget("text")
+
+
+async def test_start_with_windows_uses_the_startup_shortcut(view: SettingsView) -> None:
+    calls: list[bool] = []
+
+    async def set_startup(on: bool) -> None:
+        calls.append(on)
+
+    tab = view.library
+    tab.set_startup = set_startup
+    tab.startup_box.select()
+    await tab.toggle_startup()
+    tab.startup_box.deselect()
+    await tab.toggle_startup()
+    assert calls == [True, False]

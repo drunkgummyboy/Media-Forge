@@ -182,3 +182,8 @@ def test_installer_shortcuts_carry_mediaforges_app_id(tmp_path: Path) -> None:
     assert result.stdout.strip().splitlines()[-1:] == [APP_USER_MODEL_ID], (
         result.stdout + result.stderr
     )
+
+
+def test_uninstaller_removes_the_startup_shortcut() -> None:
+    text = UNINSTALL.read_text(encoding="ascii")
+    assert "GetFolderPath('Startup')) 'MediaForge.lnk') $mainPy" in text

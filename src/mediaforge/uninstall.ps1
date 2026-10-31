@@ -179,6 +179,7 @@ function Uninstall-MediaForge {
     Remove-Menu $mainPy
     Remove-Shortcut (Join-Path ([Environment]::GetFolderPath('Programs')) 'MediaForge.lnk') $mainPy
     Remove-Shortcut (Join-Path ([Environment]::GetFolderPath('Desktop')) 'MediaForge.lnk') $mainPy
+    Remove-Shortcut (Join-Path ([Environment]::GetFolderPath('Startup')) 'MediaForge.lnk') $mainPy
 
     Remove-Item -LiteralPath $installDir -Recurse -Force -ErrorAction SilentlyContinue
     $leftOver = Test-Path -LiteralPath $installDir
