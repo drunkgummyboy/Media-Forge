@@ -465,8 +465,34 @@ function Install-MediaForge {
     }
     Write-Host 'It updates itself.'
     if (-not $NoLaunch) {
-        Start-Process -FilePath $pythonw -ArgumentList ('"' + $mainPy + '"') -WorkingDirectory $InstallDir
+        $shortcut = ''
+        if (-not $NoShortcuts) { $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'MediaForge.lnk' }
+        switch (Get-LaunchPlan (Test-Elevated) $shortcut) {
+            'direct' { Start-Process -FilePath $pythonw -ArgumentList ('"' + $mainPy + '"') -WorkingDirectory $InstallDir }
+            # Explorer opens the shortcut with normal rights, like a click on it.
+            'explorer' { Start-Process -FilePath 'explorer.exe' -ArgumentList ('"' + $shortcut + '"') }
+            default { Write-Host 'Open MediaForge from the Start menu.' }
+        }
     }
+}
+
+function Test-Elevated {
+    # $true when this PowerShell runs with administrator rights ("Run as administrator").
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        return ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
+
+function Get-LaunchPlan([bool]$Elevated, [string]$Shortcut) {
+    # How to start MediaForge at the end: never with administrator rights, because a MediaForge
+    # started that way can't be reached by the normal launches that follow (the desktop shortcut,
+    # the right-click menu), so they would open nothing.
+    if (-not $Elevated) { return 'direct' }
+    if ($Shortcut) { return 'explorer' }
+    return 'none'
 }
 
 # No `exit` anywhere: under `irm | iex` it would close the user's PowerShell window.

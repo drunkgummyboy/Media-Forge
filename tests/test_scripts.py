@@ -131,3 +131,29 @@ def test_find_python_keeps_non_ascii_paths_intact(tmp_path: Path) -> None:
     )
     result = run_ps(check)
     assert result.stdout.strip().splitlines()[-1:] == ["SAME"], result.stdout + result.stderr
+
+
+def load_function(name: str) -> str:
+    """PowerShell that defines one install.ps1 function from its syntax tree (nothing runs)."""
+    return (
+        "$ast = [System.Management.Automation.Language.Parser]::ParseFile("
+        f"'{INSTALL}', [ref]$null, [ref]$null); "
+        "$fn = $ast.FindAll({ param($n) $n -is "
+        "[System.Management.Automation.Language.FunctionDefinitionAst] -and "
+        f"$n.Name -eq '{name}' }}, $true) | Select-Object -First 1; "
+        "Invoke-Expression $fn.Extent.Text; "
+    )
+
+
+def test_installer_never_starts_mediaforge_with_administrator_rights() -> None:
+    # Installed from a PowerShell opened as administrator, MediaForge started with those rights:
+    # every normal launch afterwards (the desktop shortcut) could not reach it, so nothing opened.
+    check = load_function("Get-LaunchPlan") + (
+        "Get-LaunchPlan $false 'C:/x/MediaForge.lnk'; "
+        "Get-LaunchPlan $true 'C:/x/MediaForge.lnk'; "
+        "Get-LaunchPlan $true ''"
+    )
+    result = run_ps(check)
+    assert result.stdout.split() == ["direct", "explorer", "none"], result.stdout + result.stderr
+    code = INSTALL.read_text(encoding="ascii")
+    assert "Get-LaunchPlan (Test-Elevated)" in code
