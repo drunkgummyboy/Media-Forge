@@ -28,6 +28,7 @@ from mediaforge.ui.theme import ASSETS, Palette, font
 
 if TYPE_CHECKING:
     from mediaforge.app import Services
+    from mediaforge.core.auto import WatchStatus
 
 log = logging.getLogger("mediaforge.ui")
 
@@ -143,6 +144,29 @@ class MainShell(ctk.CTkFrame):
             row, text="Drop files here", font=font(11), text_color=p.muted
         )
         self.status_label.pack(side="right", pady=(0, 8))
+        self.status_label.bind("<Button-1>", lambda e: self.open_library_settings())
+        # The watching light (1.3): left of the status text while renaming on its own is set up.
+        self.watch_dot = ctk.CTkLabel(row, text="●", font=font(12), text_color=p.muted)
+        self.watch_dot.bind("<Button-1>", lambda e: self.open_library_settings())
+
+    def set_watch_status(self, status: WatchStatus) -> None:
+        """Watching, trial, can't reach the NAS, or not set up: a coloured dot and a few words."""
+        p = self.palette
+        if status.state == "off":
+            self.status_label.configure(text="Drop files here", cursor="")
+            self.watch_dot.pack_forget()
+            return
+        colour = {"watching": p.success, "trial": p.warning, "unreachable": p.error}
+        self.status_label.configure(text=status.text, cursor="hand2")
+        self.watch_dot.configure(text_color=colour.get(status.state, p.muted))
+        self.watch_dot.pack(side="right", padx=(0, 6), pady=(0, 8))
+
+    def open_library_settings(self) -> None:
+        self.show_view("settings")
+        settings = self.views.get("settings")
+        tabs = getattr(settings, "tabs", None)
+        if tabs is not None and "Library" in getattr(settings, "tab_names", ()):
+            tabs.set("Library")
 
     def _kind_clicked(self, value: str) -> None:
         self.set_kind("movies" if value.startswith(KINDS["movies"]) else "series")

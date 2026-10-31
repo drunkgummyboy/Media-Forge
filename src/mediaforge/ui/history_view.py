@@ -21,6 +21,7 @@ from mediaforge.models.history import (
     RunSummary,
     UndoState,
 )
+from mediaforge.models.media import MediaKind
 from mediaforge.ui.theme import Palette, font
 from mediaforge.ui.widgets.dialogs import ask_choice, confirm
 from mediaforge.ui.widgets.virtual_list import Row, VirtualList
@@ -29,6 +30,7 @@ if TYPE_CHECKING:
     from mediaforge.app import Services
 
 log = logging.getLogger("mediaforge.ui")
+_NOTHING_YET = "Nothing here yet. Runs show up after you Forge some files."
 
 _HIDDEN_KINDS = (OpKind.CREATE_DIR, OpKind.REMOVE_DIR)  # undone along with the files
 
@@ -262,6 +264,7 @@ class HistoryView(ctk.CTkFrame):
         self.services = services
         self.palette = palette
         self.cards: list[RunCard] = []
+        self.kind = "series"  # the Series | Movies switch
         self._headings: list[tuple[str, ctk.CTkLabel]] = []
         self._card_days: list[str] = []
         self._generation = 0  # bumped by each reload; an older reload stops building
@@ -287,7 +290,7 @@ class HistoryView(ctk.CTkFrame):
         self.list.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         self.empty_label = ctk.CTkLabel(
             self.list,
-            text="Nothing here yet. Runs show up after you Forge some files.",
+            text=_NOTHING_YET,
             font=font(12),
             text_color=palette.muted,
         )
@@ -302,7 +305,10 @@ class HistoryView(ctk.CTkFrame):
         return task
 
     def set_kind(self, kind: str) -> None:
-        """The Series | Movies switch: not used here (History mixes both; see the 1.2 plan)."""
+        """The Series | Movies switch: only runs that renamed this kind (old runs on both sides)."""
+        if kind != self.kind:
+            self.kind = kind
+            self.spawn(self.reload())
 
     def on_show(self) -> None:
         self.spawn(self.reload())
@@ -310,9 +316,11 @@ class HistoryView(ctk.CTkFrame):
     async def reload(self) -> None:
         self._generation += 1
         generation = self._generation
-        runs = await self.services.history.list_runs()
+        every = await self.services.history.list_runs()
         if generation != self._generation:
             return
+        wanted = MediaKind.MOVIE if self.kind == "movies" else MediaKind.EPISODE
+        runs = [r for r in every if not r.kinds or wanted in r.kinds]
         for card in self.cards:
             card.destroy()
         for _, heading in self._headings:
@@ -321,6 +329,9 @@ class HistoryView(ctk.CTkFrame):
         self._headings = []
         self._card_days = []
         if not runs:
+            noun = "movies" if self.kind == "movies" else "shows"
+            text = f"No renamed {noun} yet" if every else _NOTHING_YET
+            self.empty_label.configure(text=text)
             self.empty_label.pack(pady=40)
             return
         self.empty_label.pack_forget()

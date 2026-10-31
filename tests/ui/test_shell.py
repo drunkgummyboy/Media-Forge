@@ -306,3 +306,22 @@ async def test_the_switch_is_not_rebuilt_when_its_labels_stay(shell: MainShell) 
     shell.set_counts(needs=4, other_kind=2)
     after = list(shell.kind_switch._buttons_dict.values())  # pyright: ignore[reportPrivateUsage]
     assert after == before
+
+
+async def test_the_watching_light_follows_the_status(tk_root: DnDCTk, shell: MainShell) -> None:
+    from mediaforge.core.auto import WatchStatus
+
+    shell.set_watch_status(WatchStatus("trial", "Trial: watching 1 folder"))
+    await pump(tk_root, 0.05)
+    assert shell.status_label.cget("text") == "Trial: watching 1 folder"
+    assert shell.watch_dot.winfo_ismapped() and shell.watch_dot.cget("text_color") == DARK.warning
+    shell.set_watch_status(WatchStatus("watching", "Watching 2 folders"))
+    assert shell.watch_dot.cget("text_color") == DARK.success
+    shell.set_watch_status(WatchStatus("unreachable", "Can't reach the NAS"))
+    assert shell.watch_dot.cget("text_color") == DARK.error
+    shell.open_library_settings()
+    assert shell.current_view == "settings"
+    shell.set_watch_status(WatchStatus("off", "Not watching"))
+    await pump(tk_root, 0.05)
+    assert shell.status_label.cget("text") == "Drop files here"
+    assert not shell.watch_dot.winfo_ismapped()

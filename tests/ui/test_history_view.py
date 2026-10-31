@@ -246,3 +246,43 @@ async def test_automatic_runs_are_labelled(
     await view.reload()
     await pump(tk_root, 0.05)
     assert view.cards[0].tag_text() == "automatic"
+
+
+async def _run_of(services: Services, kinds: tuple[object, ...]) -> int:
+    history = services.history
+    run_id = await history.start_run(RunSource.APP, "Auto", kinds=kinds)  # type: ignore[arg-type]
+    op = await history.record_pending(run_id, OpKind.RENAME, Path("a.mkv"), Path("b.mkv"))
+    await history.mark_done(op)
+    assert await history.finish_run(run_id)
+    return run_id
+
+
+async def test_history_follows_the_switch(
+    tk_root: DnDCTk, view: HistoryView, services: Services
+) -> None:
+    from mediaforge.models.media import MediaKind
+
+    old = await _run_of(services, ())  # from before 1.3: no kinds, shown on both sides
+    episodes = await _run_of(services, (MediaKind.EPISODE,))
+    movies = await _run_of(services, (MediaKind.MOVIE,))
+    view.set_kind("movies")
+    await view.reload()
+    await pump(tk_root, 0.05)
+    assert [c.run.id for c in view.cards] == [movies, old]
+    view.set_kind("series")
+    await view.reload()
+    await pump(tk_root, 0.05)
+    assert [c.run.id for c in view.cards] == [episodes, old]
+
+
+async def test_an_empty_side_says_so(
+    tk_root: DnDCTk, view: HistoryView, services: Services
+) -> None:
+    from mediaforge.models.media import MediaKind
+
+    await _run_of(services, (MediaKind.MOVIE,))
+    view.set_kind("series")
+    await view.reload()
+    await pump(tk_root, 0.05)
+    assert view.cards == [] and view.empty_label.winfo_manager() != ""
+    assert view.empty_label.cget("text") == "No renamed shows yet"

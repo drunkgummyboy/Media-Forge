@@ -91,6 +91,17 @@ def _preset(name: str, fallback: str, presets: Sequence[Preset]) -> Preset:
     return next(p for p in DEFAULT_PRESETS if p.name == fallback)
 
 
+def library_naming(
+    item: QueueItem, settings: AppSettings, presets: Sequence[Preset]
+) -> tuple[str, Path]:
+    """The naming rule and library folder a watched download goes to (by its kind)."""
+    if item.media.kind is MediaKind.EPISODE:
+        preset = _preset(settings.series_preset, "Series (Folder)", presets)
+        return preset.format, Path(settings.series_folder)
+    preset = _preset(settings.movies_preset, "Movie (Folder)", presets)
+    return preset.format, Path(settings.movies_folder)
+
+
 def _same(a: Path, b: Path) -> bool:
     return os.path.normcase(str(a)) == os.path.normcase(str(b))
 

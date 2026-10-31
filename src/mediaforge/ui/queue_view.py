@@ -17,6 +17,7 @@ import tkinter as tk
 from collections import Counter
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from tkinter import filedialog
 from typing import TYPE_CHECKING, Any, Concatenate
@@ -24,11 +25,12 @@ from typing import TYPE_CHECKING, Any, Concatenate
 import customtkinter as ctk
 
 from mediaforge.api.trailers import ToolInstallError
-from mediaforge.core.executor import ProgressEvent
+from mediaforge.core.auto import library_naming
+from mediaforge.core.executor import ProgressEvent, RunResult
 from mediaforge.core.formatter import render
 from mediaforge.core.planner import build_plan, describe
 from mediaforge.core.queue import ItemStatus, QueueEvent, QueueItem
-from mediaforge.models.history import RunSource
+from mediaforge.models.history import OpKind, RunSource
 from mediaforge.models.media import MediaKind
 from mediaforge.models.preset import Preset, PresetOptions
 from mediaforge.ui.detail_panel import DetailPanel
@@ -131,6 +133,9 @@ def build_rows(items: Sequence[QueueItem], fmt: str) -> tuple[list[Row], dict[in
 
 
 _FINISHED = (ItemStatus.DONE, ItemStatus.SKIPPED)
+_NEEDS_OWNER = (ItemStatus.NEEDS_CHOICE, ItemStatus.HELD, ItemStatus.ERROR)
+_WAITING = (ItemStatus.HELD, ItemStatus.ERROR)  # a watched download held back, with a reason
+DONE_TODAY = "Done today"
 
 
 def item_kind(item: QueueItem) -> str:
@@ -192,22 +197,60 @@ def episode_code(item: QueueItem) -> str:
     return code
 
 
-def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRows:
-    """The Inbox's rows for one kind ("series", "movies" or "all")."""
+def _needs_you(item: QueueItem) -> bool:
+    """Dropped files not renamed yet, and downloads that wait for the owner."""
+    if item.status in _FINISHED:
+        return False
+    return item.watched is None or item.status in _NEEDS_OWNER
+
+
+def _done_on(item: QueueItem, today: date | None) -> bool:
+    if item.status not in _FINISHED:
+        return False
+    if today is None or item.finished_at is None:
+        return True
+    return date.fromtimestamp(item.finished_at) == today
+
+
+def build_inbox_rows(
+    items: Sequence[QueueItem],
+    fmt: str,
+    kind: str,
+    *,
+    naming: Callable[[QueueItem], tuple[str, Path]] | None = None,
+    waiting_title: str = "Would rename",
+    today: date | None = None,
+) -> InboxRows:
+    """The Inbox's rows for one kind ("series", "movies" or "all").
+
+    `naming` gives a watched download its library folder and naming rule; dropped files are
+    renamed where they are with `fmt`. Only today's finished files are shown when `today` is set.
+    """
     out = InboxRows()
     rendered = {}
+    roots: dict[int, Path] = {}
     for item in items:
-        rendered[item.id] = render(fmt, item.media, item.path.suffix)
-        out.targets[item.id] = item.root.joinpath(*rendered[item.id].parts)
+        item_fmt, root = (fmt, item.root)
+        if naming is not None and item.watched is not None:
+            item_fmt, root = naming(item)
+        rendered[item.id] = render(item_fmt, item.media, item.path.suffix)
+        roots[item.id] = root
+        out.targets[item.id] = root.joinpath(*rendered[item.id].parts)
     per_kind = Counter(item_kind(i) for i in items)
-    out.needs = sum(1 for i in items if i.status not in _FINISHED)
+    out.needs = sum(1 for i in items if _needs_you(i))
     out.other_kind = 0 if kind == "all" else sum(n for k, n in per_kind.items() if k != kind)
     shown = [i for i in items if kind == "all" or item_kind(i) == kind]
     keys = itertools.count(1)
     sections = (
-        ("Needs you", [i for i in shown if i.status not in _FINISHED]),
-        ("Done", [i for i in shown if i.status in _FINISHED]),
+        ("Needs you", [i for i in shown if _needs_you(i)]),
+        (waiting_title, [i for i in shown if i.status not in _FINISHED and not _needs_you(i)]),
+        (DONE_TODAY, [i for i in shown if _done_on(i, today)]),
     )
+
+    def folders(item: QueueItem) -> tuple[str, ...]:
+        library = (roots[item.id].name,) if item.watched is not None and naming else ()
+        return (*library, *rendered[item.id].parts[:-1])
+
     for section, members in sections:
         if not members:
             continue
@@ -227,9 +270,13 @@ def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRo
             )
             first = group[0].media
             unsure = any(i.status is ItemStatus.NEEDS_CHOICE for i in group)
-            where = _shared_folder([rendered[i.id].parts[:-1] for i in group])
+            waiting = [i for i in group if i.watched is not None and i.status in _WAITING]
+            where = _shared_folder([folders(i) for i in group])
             if unsure:
                 subtitle = f"TMDB isn't sure · {_plural(len(group), 'file')}"
+            elif waiting:
+                reason = waiting[0].message or "Waiting for you"
+                subtitle = f"{reason} · {_plural(len(group), 'file')}"
             elif episodes:
                 count = _plural(len(group), "episode")
                 subtitle = " · ".join(x for x in (_seasons(group), count) if x) + f" → {where}"
@@ -239,10 +286,10 @@ def build_inbox_rows(items: Sequence[QueueItem], fmt: str, kind: str) -> InboxRo
                 ) + f"→ {where}"
             band_key = -next(keys)
             out.bands[band_key] = [i.id for i in group]
-            if section == "Done":
+            if section == DONE_TODAY:
                 times = [i.finished_at for i in group if i.finished_at]
                 note = time.strftime("%H:%M", time.localtime(max(times))) if times else "Done"
-                actions: tuple[tuple[str, str], ...] = ()
+                actions: tuple[tuple[str, str], ...] = (("undo", "Undo"),)
             else:
                 note = ""
                 actions = (
@@ -596,12 +643,12 @@ class QueueView(ctk.CTkFrame):
         self._refresh_id = None
         items = self.services.queue.items
         seen, self._seen = self._seen, {i.id for i in items}
-        inbox = build_inbox_rows(items, self.fmt, self.kind)
+        inbox = self._inbox(items)
         if not inbox.rows and inbox.other_kind and self._seen - seen:
             # New files, all for the other side: show them (a click on an empty side stays).
             self.kind = _OTHER[self.kind]
             self.on_kind(self.kind)
-            inbox = build_inbox_rows(items, self.fmt, self.kind)
+            inbox = self._inbox(items)
         self._targets, self._bands = inbox.targets, inbox.bands
         self.list.set_rows(inbox.rows)
         if inbox.rows:
@@ -628,6 +675,17 @@ class QueueView(ctk.CTkFrame):
         selected = self.services.queue.get(self.list.selected) if self.list.selected else None
         self.detail.show(selected, self._targets.get(selected.id) if selected else None)
         self.on_counts(inbox.needs, inbox.other_kind)
+
+    def _inbox(self, items: Sequence[QueueItem]) -> InboxRows:
+        settings = self.services.app_settings
+        return build_inbox_rows(
+            items,
+            self.fmt,
+            self.kind,
+            naming=lambda item: library_naming(item, settings, self.presets),
+            waiting_title="Renaming now" if settings.automatic == "on" else "Would rename",
+            today=date.today(),
+        )
 
     # --- bands -----------------------------------------------------------------------------
 
@@ -675,6 +733,8 @@ class QueueView(ctk.CTkFrame):
         ids = self._bands.get(key, [])
         if action == "rename":
             self.spawn(self.forge(only=ids))
+        elif action == "undo":
+            self.spawn(self.undo_band(ids))
         elif action == "choose":
             for item_id in ids:
                 item = self.services.queue.get(item_id)
@@ -889,17 +949,16 @@ class QueueView(ctk.CTkFrame):
         self.cancel_button.configure(command=self._cancel.set)
         self._set_running(True)
         try:
-            inputs = self.services.queue.plan_inputs([i.id for i in items])
-            plan = await asyncio.to_thread(build_plan, inputs, self.fmt, options)
-            self._targets_in_run = {f.item_id: f.target for f in plan.files}
-            result = await self.services.executor.run(
-                plan,
-                source=RunSource.APP,
-                preset_name=self.preset.name if self.preset else None,
-                on_progress=self._on_progress,
-                cancel=self._cancel,
-                kinds={i.media.kind for i in items},
-            )
+            result = RunResult()
+            watched = [i.id for i in items if i.watched is not None]
+            if watched:  # into the library, with the Series or Movies preset
+                result = await self.services.auto.rename(
+                    watched, source=RunSource.APP, on_progress=self._on_watched_progress
+                )
+            dropped = [i for i in items if i.watched is None]
+            if dropped:
+                async with self.services.run_lock:  # never alongside an automatic run
+                    result = _merge(result, await self._forge_dropped(dropped, options))
         finally:
             self._set_running(False)
             close, self._close_after_run = self._close_after_run, None
@@ -919,6 +978,49 @@ class QueueView(ctk.CTkFrame):
             log.warning(summary)
         else:
             log.info(summary, extra={"success": True})
+
+    async def _forge_dropped(self, items: Sequence[QueueItem], options: PresetOptions) -> RunResult:
+        queue = self.services.queue
+        inputs = queue.plan_inputs([i.id for i in items])
+        plan = await asyncio.to_thread(build_plan, inputs, self.fmt, options)
+        self._targets_in_run = {f.item_id: f.target for f in plan.files}
+        result = await self.services.executor.run(
+            plan,
+            source=RunSource.APP,
+            preset_name=self.preset.name if self.preset else None,
+            on_progress=self._on_progress,
+            cancel=self._cancel,
+            kinds={i.media.kind for i in items},
+        )
+        for item in items:  # a Done band's Undo needs the run
+            if item.status is ItemStatus.DONE and item.run_id is None:
+                item.run_id = result.run_id
+        return result
+
+    def _on_watched_progress(self, event: ProgressEvent) -> None:
+        self.progress.set(event.fraction)
+        self._schedule_refresh(60)
+
+    async def undo_band(self, ids: Sequence[int]) -> None:
+        """A Done band's Undo: put those files back; they leave the Inbox."""
+        queue, history = self.services.queue, self.services.history
+        items = [i for i in (queue.get(n) for n in ids) if i is not None and i.run_id is not None]
+        op_ids: list[int] = []
+        async with self.services.run_lock:
+            for item in items:
+                ops = await history.operations(item.run_id or 0)
+                op_ids += [
+                    o.id
+                    for o in ops
+                    if o.kind is OpKind.RENAME and o.dst == str(item.path) and o.undoable
+                ]
+            if not op_ids:
+                log.info("Nothing to undo for these files.")
+                return
+            result = await self.services.undo.undo_operations(op_ids)
+        for item in items:
+            queue.remove(item.id)
+        log.info("Put back %d file(s)", result.undone, extra={"success": True})
 
     @_one_at_a_time
     async def undo_latest(self) -> None:
@@ -949,3 +1051,17 @@ class QueueView(ctk.CTkFrame):
         for task in list(self._tasks):
             task.cancel()
         super().destroy()
+
+
+def _merge(a: RunResult, b: RunResult) -> RunResult:
+    """One summary line for a Forge that renamed downloads and dropped files."""
+    return RunResult(
+        run_id=b.run_id or a.run_id,
+        renamed=a.renamed + b.renamed,
+        skipped=a.skipped + b.skipped,
+        failed=a.failed + b.failed,
+        posters=a.posters + b.posters,
+        trailers=a.trailers + b.trailers,
+        cancelled=a.cancelled or b.cancelled,
+        errors=[*a.errors, *b.errors],
+    )

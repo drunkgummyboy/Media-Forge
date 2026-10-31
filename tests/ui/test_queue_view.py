@@ -1,3 +1,4 @@
+import asyncio
 import time
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
@@ -356,9 +357,9 @@ async def test_finished_items_move_to_done(
     await view.forge()
     await pump(tk_root, 0.2)
     rows = view.list.rows
-    assert [r.title for r in rows if r.kind == "section"] == ["Done"]
+    assert [r.title for r in rows if r.kind == "section"] == ["Done today"]
     done = [r for r in rows if r.kind == "band"]
-    assert len(done) == 2 and all(r.note and not r.actions for r in done)
+    assert len(done) == 2 and all(r.note and r.actions == (("undo", "Undo"),) for r in done)
     lines = [r for r in rows if r.kind == "item"]
     assert {r.faint for r in lines} == {"Dune.2021.mkv", "Heat.1995.1080p.mkv"}
 
@@ -516,3 +517,150 @@ async def test_a_band_with_several_seasons_names_them_and_their_shared_folder(
     [band] = [r for r in view.list.rows if r.kind == "band"]
     assert band.subtitle.startswith("Seasons 1, 3 · 2 episodes → VisionQuest")
     assert "Season 01" not in band.subtitle
+
+
+# --- watched downloads in the Inbox (1.3) ------------------------------------------------------
+
+
+async def library(view: QueueView, root: Path, automatic: str = "on") -> tuple[Path, Path, Path]:
+    downloads, series, movies = root / "dl", root / "lib" / "Series", root / "lib" / "Movies"
+    for folder in (downloads, series, movies):
+        folder.mkdir(parents=True, exist_ok=True)
+    services = view.services
+    chosen = (await services.settings.load()).model_copy(
+        update={
+            "watch_folders": [str(downloads)],
+            "series_folder": str(series),
+            "movies_folder": str(movies),
+            "automatic": automatic,
+        }
+    )
+    await services.settings.save(chosen)  # as Settings › Library does
+    services.app_settings = chosen
+    return downloads, series, movies
+
+
+async def watched(tk_root: DnDCTk, view: QueueView, downloads: Path, *names: str) -> list[int]:
+    make_files(downloads, names)
+    ids = await view.services.queue.add_watched([(downloads / n, downloads) for n in names])
+    await view.services.queue.wait_idle()
+    view.refresh()
+    await pump(tk_root, 0.1)
+    return ids
+
+
+def sections(view: QueueView) -> list[str]:
+    return [r.title for r in view.list.rows if r.kind == "section"]
+
+
+async def test_watched_files_show_where_they_will_go(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, _ = await library(view, tmp_path)
+    await watched(tk_root, view, downloads, "VisionQuest.S01E02.Theseus.mkv")
+    [band] = [r for r in view.list.rows if r.kind == "band"]
+    assert "→ Series › VisionQuest › VisionQuest - Season 01" in band.subtitle
+
+
+async def test_held_files_are_under_needs_you_with_their_reason(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, _ = await library(view, tmp_path)
+    [item_id] = await watched(tk_root, view, downloads, "Dune.mkv")
+    view.services.queue.hold(item_id, "No year in the name: is it a movie?")
+    view.refresh()
+    await pump(tk_root, 0.1)
+    assert sections(view) == ["Needs you"]
+    [band] = [r for r in view.list.rows if r.kind == "band"]
+    assert band.subtitle.startswith("No year in the name: is it a movie?")
+    assert band.actions[-1] == ("rename", "Rename")
+
+
+async def test_trial_files_are_under_would_rename(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, _ = await library(view, tmp_path, automatic="trial")
+    await watched(tk_root, view, downloads, "Dune.2021.mkv")
+    assert sections(view) == ["Would rename"]
+
+
+async def test_done_today_hides_yesterday(tk_root: DnDCTk, view: QueueView, tmp_path: Path) -> None:
+    make_files(tmp_path / "in", ["Dune.2021.mkv", "Heat.1995.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    queue = view.services.queue
+    old, new = queue.items
+    queue.mark_finished(old.id, old.path)
+    queue.mark_finished(new.id, new.path)
+    old.finished_at = time.time() - 2 * 24 * 3600
+    view.refresh()
+    await pump(tk_root, 0.1)
+    assert sections(view) == ["Done today"]
+    assert len([r for r in view.list.rows if r.kind == "band"]) == 1
+
+
+async def test_needs_counts_only_what_needs_you(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    counts: list[tuple[int, int]] = []
+    view.on_counts = lambda needs, other: counts.append((needs, other))
+    downloads, _, _ = await library(view, tmp_path)
+    make_files(tmp_path / "in", ["Ted.Lasso.S04E03.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")  # a dropped file: needs you
+    ready, held = await watched(
+        tk_root, view, downloads, "Ted.Lasso.S04E04.mkv", "Ted.Lasso.S04E05.mkv"
+    )
+    view.services.queue.hold(held, "TMDB doesn't know this episode.")
+    view.refresh()
+    await pump(tk_root, 0.1)
+    assert counts[-1][0] == 2  # the dropped file and the held one, not the one about to move
+    assert view.services.queue.get(ready) is not None
+
+
+async def test_rename_on_a_watched_band_moves_it_to_the_library(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, movies = await library(view, tmp_path)
+    [item_id] = await watched(tk_root, view, downloads, "Dune.2021.mkv")
+    band = next(r.key for r in view.list.rows if r.kind == "band")
+    view._on_band_action(band, "rename")  # pyright: ignore[reportPrivateUsage]
+    target = movies / "Dune (2021)" / "Dune (2021).mkv"
+    await pump_until(tk_root, target.exists)
+    item = view.services.queue.get(item_id)
+    assert item is not None and item.status is ItemStatus.DONE
+    assert not (downloads / "Dune.2021.mkv").exists()
+
+
+async def test_undo_on_a_done_band_puts_the_file_back(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    make_files(tmp_path / "in", ["Heat.1995.1080p.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    view.select_preset("Movie (Flat)")
+    await view.settled()
+    await view.forge()
+    await pump(tk_root, 0.2)
+    assert (tmp_path / "in" / "Heat (1995).mkv").exists()
+    band = next(r.key for r in view.list.rows if r.kind == "band")
+    view._on_band_action(band, "undo")  # pyright: ignore[reportPrivateUsage]
+    await pump_until(tk_root, (tmp_path / "in" / "Heat.1995.1080p.mkv").exists)
+    await pump(tk_root, 0.2)
+    assert view.services.queue.items == []
+
+
+async def test_forge_waits_for_an_automatic_run(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    make_files(tmp_path / "in", ["Heat.1995.1080p.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    view.select_preset("Movie (Flat)")
+    await view.settled()
+    lock = view.services.run_lock
+    await lock.acquire()  # an automatic run is busy
+    try:
+        task = asyncio.get_running_loop().create_task(view.forge())
+        await pump(tk_root, 0.3)
+        assert (tmp_path / "in" / "Heat.1995.1080p.mkv").exists()
+    finally:
+        lock.release()
+    await task
+    assert (tmp_path / "in" / "Heat (1995).mkv").exists()
