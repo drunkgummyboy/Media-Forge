@@ -1,0 +1,217 @@
+import json
+import logging
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import pytest_asyncio
+
+from mediaforge.app import Services, build_services, close_services, self_test
+from mediaforge.platform.paths import app_paths
+from mediaforge.ui.dnd_root import DnDCTk
+from mediaforge.ui.main_window import MainShell, save_window_state
+from mediaforge.ui.theme import STUDIO_DARK, STUDIO_LIGHT, palette_for
+
+from helpers.tk import pump
+
+
+@pytest_asyncio.fixture
+async def shell(tk_root: DnDCTk, services: Services) -> AsyncIterator[MainShell]:
+    s = MainShell(tk_root, services, STUDIO_DARK)
+    s.pack(fill="both", expand=True)
+    await pump(tk_root, 0.1)
+    try:
+        yield s
+    finally:
+        s.destroy()
+
+
+async def test_shell_builds_and_switches_views(tk_root: DnDCTk, shell: MainShell) -> None:
+    assert shell.current_view == "queue"
+    for name in ("history", "settings", "queue"):
+        shell.show_view(name)
+        await pump(tk_root, 0.05)
+        assert shell.current_view == name
+        assert shell.views[name].winfo_ismapped()
+        others = [v for k, v in shell.views.items() if k != name]
+        assert not any(v.winfo_ismapped() for v in others)
+
+
+async def test_queue_view_is_wired_in(shell: MainShell) -> None:
+    from mediaforge.ui.queue_view import QueueView
+
+    assert isinstance(shell.views["queue"], QueueView)
+
+
+async def test_history_view_is_wired_in_and_reloads_on_show(
+    tk_root: DnDCTk, shell: MainShell
+) -> None:
+    from mediaforge.ui.history_view import HistoryView
+
+    view = shell.views["history"]
+    assert isinstance(view, HistoryView)
+    shell.show_view("history")
+    await pump(tk_root, 0.2)
+    assert view.empty_label.winfo_manager() != ""
+
+
+async def test_settings_preset_changes_reach_the_queue_dropdown(
+    tk_root: DnDCTk, shell: MainShell
+) -> None:
+    from mediaforge.models.media import TypeHint
+    from mediaforge.models.preset import Preset
+    from mediaforge.ui.queue_view import QueueView
+    from mediaforge.ui.settings_view import SettingsView
+
+    settings, queue = shell.views["settings"], shell.views["queue"]
+    assert isinstance(settings, SettingsView) and isinstance(queue, QueueView)
+    await settings.save_preset(Preset(name="Brand New", type=TypeHint.AUTO, format="{t}"), None)
+    await pump(tk_root, 0.3)
+    assert "Brand New" in [p.name for p in queue.presets]
+
+
+async def test_rail_highlight_follows_view(shell: MainShell) -> None:
+    shell.show_view("history")
+    assert shell.rail_buttons["history"].cget("fg_color") == STUDIO_DARK.raised
+    assert shell.rail_buttons["history"].cget("text_color") == STUDIO_DARK.accent
+    assert shell.rail_buttons["queue"].cget("fg_color") == "transparent"
+
+
+async def test_log_strip_shows_records(tk_root: DnDCTk, shell: MainShell) -> None:
+    logging.getLogger("mediaforge.test").error("boom happened")
+    await pump(tk_root, 0.3)
+    assert "boom happened" in shell.log_strip.text()
+
+
+async def test_add_paths_queues_files(tk_root: DnDCTk, shell: MainShell, tmp_path: Path) -> None:
+    (tmp_path / "Dune.2021.mkv").write_bytes(b"v")
+    shell.show_view("history")
+    await shell.add_paths([tmp_path])
+    assert len(shell.services.queue.items) == 1
+    assert shell.current_view == "queue"
+
+
+async def test_geometry_saved(tk_root: DnDCTk, services: Services) -> None:
+    await save_window_state(tk_root, services)
+    settings = await services.settings.load()
+    assert settings.window_geometry is not None and "x" in settings.window_geometry
+
+
+def test_palettes() -> None:
+    assert STUDIO_DARK.accent == "#f2a33a" and STUDIO_DARK.main == "#16181d"
+    assert palette_for("Light") is STUDIO_LIGHT
+    assert palette_for("Dark") is STUDIO_DARK
+
+
+async def test_self_test_returns_zero(tk_root: DnDCTk) -> None:
+    assert await self_test(root=tk_root) == 0
+
+
+async def test_build_services_imports_legacy(tmp_path: Path) -> None:
+    legacy = tmp_path / "old"
+    legacy.mkdir()
+    config = {
+        "TMDB_API_KEY": "",
+        "presets": {"Only Mine": {"type": "movie", "format": "{t}", "chk": []}},
+    }
+    (legacy / "mediaforge_config.json").write_text(json.dumps(config), encoding="utf-8")
+    paths = app_paths({"MEDIAFORGE_HOME": str(tmp_path / "home")})
+    paths.ensure()
+    s = await build_services(paths, legacy_dirs=[legacy])
+    try:
+        assert [p.name for p in await s.presets.list()] == ["Only Mine"]
+        assert s.tmdb is None
+    finally:
+        await close_services(s)
+
+
+async def test_log_strip_colours(tk_root: DnDCTk, shell: MainShell) -> None:
+    log = logging.getLogger("mediaforge.test")
+    log.error("bad thing")
+    log.warning("odd thing")
+    log.info("good thing", extra={"success": True})
+    await pump(tk_root, 0.3)
+    box = shell.log_strip._box  # pyright: ignore[reportPrivateUsage]
+    tagged = {tag: box.get(*box.tag_ranges(tag)[:2]) for tag in ("error", "warning", "success")}
+    assert "bad thing" in tagged["error"]
+    assert "odd thing" in tagged["warning"]
+    assert "good thing" in tagged["success"]
+
+
+async def test_update_check_stages_when_automatic(
+    tk_root: DnDCTk, shell: MainShell, services: Services
+) -> None:
+    from helpers.fake_updates import FakeUpdates
+
+    fake = FakeUpdates("1.2.0")
+    services.updates = fake  # type: ignore[assignment]
+    await shell.check_for_update(delay_s=0)
+    await pump(tk_root, 0.05)
+    assert fake.staged == ["1.2.0"]
+    assert shell.update_badge.winfo_ismapped()
+    assert shell.update_badge.cget("text") == "⬆ Restart to update"
+    shell.on_close = lambda: None
+    shell.update_badge.invoke()
+    assert shell.restart_requested
+
+
+async def test_update_check_only_offers_when_not_automatic(
+    tk_root: DnDCTk, shell: MainShell, services: Services
+) -> None:
+    from helpers.fake_updates import FakeUpdates
+
+    fake = FakeUpdates("1.2.0")
+    services.updates = fake  # type: ignore[assignment]
+    services.app_settings = services.app_settings.model_copy(update={"auto_update": False})
+    await shell.check_for_update(delay_s=0)
+    await pump(tk_root, 0.05)
+    assert fake.staged == []
+    assert shell.update_badge.cget("text") == "⬆ Update to 1.2.0"
+    shell.update_badge.invoke()
+    assert shell.current_view == "settings"
+
+
+async def test_no_update_shows_nothing(
+    tk_root: DnDCTk, shell: MainShell, services: Services
+) -> None:
+    from helpers.fake_updates import FakeUpdates
+
+    services.updates = FakeUpdates("1.1.0")  # type: ignore[assignment]
+    await shell.check_for_update(delay_s=0)
+    services.updates = FakeUpdates(fail=True)  # type: ignore[assignment]
+    await shell.check_for_update(delay_s=0)  # GitHub unreachable: quietly logged
+    await pump(tk_root, 0.05)
+    assert not shell.update_badge.winfo_ismapped()
+
+
+async def test_restart_waits_for_a_running_forge(shell: MainShell) -> None:
+    # Review focus 4: "Update now" while Forge runs stops after the current file, then restarts.
+    waiting: list[object] = []
+    closed: list[int] = []
+    queue = shell.views["queue"]
+
+    def busy(close: object) -> bool:
+        waiting.append(close)
+        return False
+
+    queue.request_close = busy  # type: ignore[attr-defined]
+    shell.on_close = lambda: closed.append(1)
+    shell.request_restart()
+    assert closed == [] and not shell.restart_requested
+    queue.request_close = lambda close: True  # type: ignore[attr-defined]
+    waiting[0]()  # type: ignore[operator]
+    assert closed == [1] and shell.restart_requested
+
+
+async def test_restart_waits_for_an_undo_in_history(tk_root: DnDCTk, shell: MainShell) -> None:
+    # Review: the spec says the restart waits for "Forge or Undo"; a cut-off undo could leave
+    # History showing the wrong state.
+    closed: list[int] = []
+    history = shell.views["history"]
+    history.busy = True  # type: ignore[attr-defined]
+    shell.on_close = lambda: closed.append(1)
+    shell.request_restart()
+    await pump(tk_root, 0.5)
+    assert closed == [] and not shell.restart_requested
+    history.busy = False  # type: ignore[attr-defined]
+    await pump(tk_root, 0.6)
+    assert closed == [1] and shell.restart_requested

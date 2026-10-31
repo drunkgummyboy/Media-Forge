@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mediaforge"
+dynamic = ["version"]
+description = "Rename and organize video files using TMDB metadata."
+requires-python = ">=3.13"
+dependencies = [
+    "customtkinter>=6.0",
+    "tkinterdnd2>=0.7",
+    "async-tkinter-loop>=0.10",
+    "aiohttp>=3.14",
+    "aiosqlite>=0.22",
+    "pydantic>=2.14",
+    "guessit>=4.4",
+    "pillow>=13",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9",
+    "pytest-asyncio>=1.4",
+    "ruff",
+    "pyright",
+]
+
+[project.scripts]
+mediaforge = "mediaforge.__main__:main"
+
+[tool.hatch.version]
+path = "src/mediaforge/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mediaforge"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--import-mode=importlib"
+pythonpath = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = ["ui: tests that create Tk windows"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "T20", "ASYNC"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may do small blocking file I/O inside async tests.
+"tests/**" = ["ASYNC230", "ASYNC240"]
+
+[tool.ruff.lint.isort]
+known-local-folder = ["helpers"]
+
+[tool.pyright]
+include = ["src/mediaforge"]
+exclude = ["src/mediaforge/ui"]
+typeCheckingMode = "strict"
+pythonVersion = "3.13"

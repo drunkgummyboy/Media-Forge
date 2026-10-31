@@ -1,0 +1,3 @@
+when proccesing items from the context menu (right click via windows explorer) open a styled window that shows the file with the old and the new name. keep in mind that this also need to be able to dislay multiple files, as you can select more than one file at once.
+
+make it possible to undo more than  one action, and also not in sequence. so i wan to be able to undo an action that has happend 5 actions ago. maybe limit this to the last 50 actions.

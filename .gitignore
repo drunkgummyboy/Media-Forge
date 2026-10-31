@@ -1,0 +1,35 @@
+# Personal settings and run state (contain the TMDB API key and local file paths)
+mediaforge_config.json
+mediaforge_undo.json
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+logs/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Build output
+build/
+dist/
+*.spec.bak
+
+# Design mockups from planning sessions
+.superpowers/
+
+# Google Drive / OS clutter
+desktop.ini
+Thumbs.db
+.DS_Store
+~$*
