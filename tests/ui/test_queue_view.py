@@ -625,9 +625,10 @@ async def test_rename_on_a_watched_band_moves_it_to_the_library(
     band = next(r.key for r in view.list.rows if r.kind == "band")
     view._on_band_action(band, "rename")  # pyright: ignore[reportPrivateUsage]
     target = movies / "Dune (2021)" / "Dune (2021).mkv"
-    await pump_until(tk_root, target.exists)
     item = view.services.queue.get(item_id)
-    assert item is not None and item.status is ItemStatus.DONE
+    assert item is not None
+    # The file lands a moment before the Inbox hears it is done: wait for both.
+    await pump_until(tk_root, lambda: target.exists() and item.status is ItemStatus.DONE)
     assert not (downloads / "Dune.2021.mkv").exists()
 
 
