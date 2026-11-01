@@ -5,12 +5,14 @@ Paths go through long_path() so deep NAS folders past 260 characters still work.
 
 from __future__ import annotations
 
+import contextlib
 import errno
 import os
 import shutil
 from pathlib import Path
 
 _ERROR_NOT_SAME_DEVICE = 17  # Windows' code for a move across drives or shares
+PARTIAL_SUFFIX = ".mediaforge-partial"  # a copy between shares that isn't whole yet
 _PREFIX = "\\\\?\\"
 _UNC_PREFIX = "\\\\?\\UNC\\"
 
@@ -72,17 +74,29 @@ def move_file(src: Path, dst: Path) -> None:
         _copy_then_delete(src, dst)
 
 
+def partial_path(dst: Path) -> Path:
+    """Where a copy between shares is written before it gets its real name."""
+    return dst.with_name(dst.name + PARTIAL_SUFFIX)
+
+
 def _copy_then_delete(src: Path, dst: Path) -> None:
+    # The copy gets its real name only once it is whole: a copy cut off (the NAS gone, the PC
+    # switched off) never leaves a half file under the name; recovery clears the partial one.
+    partial = partial_path(dst)
     with open(long_path(src), "rb") as reader:
-        # Opened exclusively *outside* the cleanup: if dst appeared meanwhile this raises
-        # FileExistsError and we never touch the file that is already there.
-        writer = open(long_path(dst), "xb")  # noqa: SIM115 - closed below
+        # Opened exclusively *outside* the cleanup: if it exists already this raises
+        # FileExistsError and we never touch a file that is already there.
+        writer = open(long_path(partial), "xb")  # noqa: SIM115 - closed below
         try:
             with writer:
                 shutil.copyfileobj(reader, writer, 16 * 1024 * 1024)
-            shutil.copystat(long_path(src), long_path(dst))
+            shutil.copystat(long_path(src), long_path(partial))
+            if os.path.lexists(long_path(dst)):
+                raise FileExistsError(errno.EEXIST, "Something already has this name", str(dst))
+            os.rename(long_path(partial), long_path(dst))
         except BaseException:
-            os.remove(long_path(dst))  # only the copy this call created
+            with contextlib.suppress(OSError):
+                os.remove(long_path(partial))  # only the copy this call created
             raise
     try:
         os.remove(long_path(src))

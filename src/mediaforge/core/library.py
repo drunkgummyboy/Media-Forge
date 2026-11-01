@@ -12,6 +12,7 @@ from pathlib import Path
 from mediaforge.db.settings import AppSettings
 
 OVERLAP = "A watched folder can't be inside a library folder, or the other way round."
+NESTED = "A watched folder can't be inside another watched folder."
 
 
 def _parts(path: Path) -> tuple[str, ...]:
@@ -34,10 +35,11 @@ def library_problems(settings: AppSettings) -> list[str]:
     if not settings.movies_folder:
         problems.append("Choose the Movies library folder.")
     libraries = [Path(f) for f in (settings.series_folder, settings.movies_folder) if f]
-    for watched in map(Path, settings.watch_folders):
-        if any(inside(watched, lib) or inside(lib, watched) for lib in libraries):
-            problems.append(OVERLAP)
-            break
+    watched = [Path(f) for f in settings.watch_folders]
+    if any(inside(w, lib) or inside(lib, w) for w in watched for lib in libraries):
+        problems.append(OVERLAP)
+    if any(inside(a, b) or inside(b, a) for i, a in enumerate(watched) for b in watched[i + 1 :]):
+        problems.append(NESTED)
     return problems
 
 

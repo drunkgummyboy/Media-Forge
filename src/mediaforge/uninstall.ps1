@@ -85,10 +85,10 @@ function Close-App([string]$MainPy) {
         }
         if (@(Get-AppProcesses $MainPy).Count -eq 0) { return $true }
         if ($Quiet) {
-            Write-Host 'MediaForge is still running, so it was not removed. Close it and try again.'
+            Write-Host 'MediaForge is still running (maybe in the tray next to the clock), so it was not removed. Quit it and try again.'
             return $false
         }
-        $answer = Show-Dialog 'MediaForge is still open. Close MediaForge first, then press Retry.' 'RetryCancel' 'Warning'
+        $answer = Show-Dialog 'MediaForge is still open, maybe in the tray next to the clock: right-click its icon and choose Quit. Then press Retry.' 'RetryCancel' 'Warning'
         if ($answer -ne 'Retry') { return $false }
     }
 }

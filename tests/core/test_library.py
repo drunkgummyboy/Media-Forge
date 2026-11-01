@@ -50,3 +50,8 @@ def test_watched_root_finds_the_folder_a_file_came_from() -> None:
     assert watched_root(Path(r"D:\torrents\Show.S01E01\show.mkv"), both) == Path(second)
     assert watched_root(Path(DOWNLOADS) / "a.mkv", both) == Path(DOWNLOADS)
     assert watched_root(Path(r"D:\Elsewhere\a.mkv"), both) is None
+
+
+def test_nested_watched_folders_are_refused() -> None:
+    nested = settings(watch_folders=[DOWNLOADS, DOWNLOADS + r"\Movies"])
+    assert library_problems(nested) == ["A watched folder can't be inside another watched folder."]

@@ -81,3 +81,29 @@ async def test_case_only_rename_judged_by_real_name(tmp_path: Path, history: His
     ops = {o.id: o for o in await history.operations(run_id)}
     assert ops[done].state is OpState.DONE
     assert ops[not_done].state is OpState.FAILED
+
+
+async def test_recovery_clears_a_partial_copy(tmp_path: Path) -> None:
+    from mediaforge.core import fsops
+    from mediaforge.core.recovery import recover
+    from mediaforge.db.database import Database
+    from mediaforge.db.history import HistoryRepo
+    from mediaforge.models.history import OpKind, OpState, RunSource
+
+    db = await Database.open(tmp_path / "h.db")
+    try:
+        history = HistoryRepo(db)
+        src, dst = tmp_path / "dl" / "a.mkv", tmp_path / "lib" / "a.mkv"
+        src.parent.mkdir()
+        dst.parent.mkdir()
+        src.write_bytes(b"video")
+        partial = dst.with_name(dst.name + fsops.PARTIAL_SUFFIX)
+        partial.write_bytes(b"vid")  # the PC went off during the copy
+        run_id = await history.start_run(RunSource.AUTOMATIC, "Movie (Folder)")
+        await history.record_pending(run_id, OpKind.RENAME, src, dst)
+        await recover(history)
+        assert not partial.exists() and src.exists() and not dst.exists()
+        [op] = await history.operations(run_id)
+        assert op.state is OpState.FAILED
+    finally:
+        await db.close()

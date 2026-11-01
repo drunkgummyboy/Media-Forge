@@ -46,7 +46,12 @@ def test_cross_volume_move_falls_back_to_copy(
     src, dst = tmp_path / "a.mkv", tmp_path / "b.mkv"
     src.write_bytes(b"data" * 1000)
 
+    real_rename = os.rename
+
     def no_rename(a: str, b: str) -> None:
+        if a.endswith(fsops.PARTIAL_SUFFIX):  # the finished copy gets its name, in place
+            real_rename(a, b)
+            return
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     monkeypatch.setattr(fsops.os, "rename", no_rename)
@@ -61,7 +66,12 @@ def test_cross_volume_copy_failure_leaves_source(
     src, dst = tmp_path / "a.mkv", tmp_path / "b.mkv"
     src.write_bytes(b"data")
 
+    real_rename = os.rename
+
     def no_rename(a: str, b: str) -> None:
+        if a.endswith(fsops.PARTIAL_SUFFIX):  # the finished copy gets its name, in place
+            real_rename(a, b)
+            return
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     def broken_copy(a: object, b: object, *args: object, **kwargs: object) -> None:
@@ -146,7 +156,12 @@ def test_cross_volume_locked_source_leaves_no_copy(
     src, dst = tmp_path / "a.mkv", tmp_path / "b.mkv"
     src.write_bytes(b"video")
 
+    real_rename = os.rename
+
     def no_rename(a: str, b: str) -> None:
+        if a.endswith(fsops.PARTIAL_SUFFIX):  # the finished copy gets its name, in place
+            real_rename(a, b)
+            return
         raise OSError(errno.EXDEV, "Invalid cross-device link")
 
     real_remove = os.remove
@@ -162,3 +177,49 @@ def test_cross_volume_locked_source_leaves_no_copy(
         move_file(src, dst)
     assert src.read_bytes() == b"video"
     assert not dst.exists()
+
+
+def test_a_cut_off_copy_never_leaves_a_file_under_the_real_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import errno
+    import shutil
+
+    src, dst = tmp_path / "dl" / "a.mkv", tmp_path / "lib" / "a.mkv"
+    src.parent.mkdir()
+    dst.parent.mkdir()
+    src.write_bytes(b"video" * 1000)
+
+    def other_share(a: str, b: str) -> None:
+        raise OSError(errno.EXDEV, "not the same device")
+
+    def cut_off(reader: object, writer: object, length: int = 0) -> None:
+        writer.write(b"half")  # type: ignore[attr-defined]
+        raise OSError("the network name is no longer available")
+
+    monkeypatch.setattr(fsops.os, "rename", other_share)
+    monkeypatch.setattr(shutil, "copyfileobj", cut_off)
+    with pytest.raises(OSError):
+        fsops.move_file(src, dst)
+    assert src.read_bytes() == b"video" * 1000
+    assert list(dst.parent.iterdir()) == []  # neither a half file under the name nor a partial
+
+
+def test_a_copy_between_shares_lands_whole(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import errno
+
+    src, dst = tmp_path / "dl" / "a.mkv", tmp_path / "lib" / "a.mkv"
+    src.parent.mkdir()
+    dst.parent.mkdir()
+    src.write_bytes(b"video")
+    real_rename = fsops.os.rename
+
+    def rename(a: str, b: str) -> None:
+        if "dl" in a and "lib" in b and not a.endswith(fsops.PARTIAL_SUFFIX):
+            raise OSError(errno.EXDEV, "not the same device")
+        real_rename(a, b)
+
+    monkeypatch.setattr(fsops.os, "rename", rename)
+    fsops.move_file(src, dst)
+    assert dst.read_bytes() == b"video" and not src.exists()
+    assert [p.name for p in dst.parent.iterdir()] == ["a.mkv"]

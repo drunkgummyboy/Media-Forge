@@ -187,3 +187,10 @@ def test_installer_shortcuts_carry_mediaforges_app_id(tmp_path: Path) -> None:
 def test_uninstaller_removes_the_startup_shortcut() -> None:
     text = UNINSTALL.read_text(encoding="ascii")
     assert "GetFolderPath('Startup')) 'MediaForge.lnk') $mainPy" in text
+
+
+def test_still_open_messages_mention_the_tray() -> None:
+    uninstall = UNINSTALL.read_text(encoding="ascii")
+    install = (ROOT / "install.ps1").read_text(encoding="ascii")
+    assert uninstall.count("tray") >= 2  # the dialog and the quiet message
+    assert "tray" in install.split("MediaForge is open.", 1)[1].split("\n", 1)[0]

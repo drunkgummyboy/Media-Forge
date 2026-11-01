@@ -1,5 +1,6 @@
 """Renaming on its own: finished downloads are looked up, decided on, and moved into the library."""
 
+import asyncio
 import logging
 import os
 import time
@@ -338,3 +339,104 @@ async def test_rename_by_the_owner_moves_a_held_file(services: Services, folders
     assert result.renamed == 1
     assert (folders.movies / "Dune (2021)" / "Dune (2021).mkv").exists()
     assert item.status is ItemStatus.DONE
+
+
+async def test_rename_after_off_still_moves(services: Services, folders: Folders) -> None:
+    use(services, folders)
+    folders.download("Dune.mkv")
+    clock = Clock()
+    auto = renamer(services, clock)
+    auto.start()
+    await asyncio.sleep(0.2)
+    clock.now += 300
+    auto.look_soon()
+    await asyncio.sleep(0.5)
+    [item] = services.queue.items
+    use(services, folders, automatic="off")
+    auto.reconfigure()
+    await auto.stop()
+    result = await auto.rename([item.id], source=RunSource.APP)
+    assert result.renamed == 1 and item.status is ItemStatus.DONE
+
+
+async def test_off_then_on_during_a_look_keeps_watching(
+    services: Services, folders: Folders
+) -> None:
+    use(services, folders)
+    auto = renamer(services, Clock())
+    auto.start()
+    await asyncio.sleep(0)
+    use(services, folders, automatic="off")
+    auto.reconfigure()
+    use(services, folders, automatic="trial")
+    auto.reconfigure()
+    await asyncio.sleep(0.5)
+    assert auto.running
+    await auto.stop()
+
+
+async def test_a_mode_change_before_the_lock_moves_nothing(
+    services: Services, folders: Folders
+) -> None:
+    use(services, folders)
+    file = folders.download("Dune.2021.2160p.WEB-DL.mkv")
+    clock = Clock()
+    auto = renamer(services, clock)
+    await auto.look()
+    clock.now += 300
+    await services.run_lock.acquire()  # the owner's Forge is busy
+    look = asyncio.get_running_loop().create_task(auto.look())
+    await asyncio.sleep(0.3)
+    use(services, folders, automatic="trial")  # meanwhile the owner chose Trial
+    services.run_lock.release()
+    await look
+    assert file.exists()
+
+
+async def test_kept_back_survives_history_trimming(services: Services, folders: Folders) -> None:
+    use(services, folders)
+    file = folders.download("Dune.2021.2160p.WEB-DL.mkv")
+    clock = Clock()
+    auto = renamer(services, clock)
+    await two_looks(auto, clock)
+    [item] = services.queue.items
+    assert item.run_id is not None
+    await services.undo.undo_run(item.run_id)
+    clock.now += 300
+    await two_looks(auto, clock)  # it comes back, and is held as undone
+    await services.db.conn.execute("DELETE FROM runs")  # later trimmed after 50 newer runs
+    await services.db.conn.commit()
+    services.queue.clear()
+    fresh = renamer(services, clock)  # as after a restart
+    clock.now += 300
+    await two_looks(fresh, clock)
+    assert file.exists()
+    [held] = services.queue.items
+    assert held.status is ItemStatus.HELD
+
+
+async def test_offline_files_are_looked_up_again(services: Services, folders: Folders) -> None:
+    from mediaforge.api.tmdb import TmdbError
+
+    use(services, folders)
+    folders.download("Dune.2021.2160p.WEB-DL.mkv")
+    flaky = Tmdb()
+    original = flaky.search_movie
+    down = [True]
+
+    async def search_movie(query: str, year: int | None) -> list[TmdbResult]:
+        if down[0]:
+            raise TmdbError("the router is restarting")
+        return await original(query, year)
+
+    flaky.search_movie = search_movie  # type: ignore[method-assign]
+    services.resolver.set_client(flaky)  # type: ignore[arg-type]
+    clock = Clock()
+    auto = renamer(services, clock)
+    await two_looks(auto, clock)
+    [item] = services.queue.items
+    assert item.status is ItemStatus.HELD
+    down[0] = False
+    clock.now += 300
+    await auto.look()
+    assert (folders.movies / "Dune (2021)" / "Dune (2021).mkv").exists()

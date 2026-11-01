@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from mediaforge.core.auto import decide, library_runs, owner_runs
+from mediaforge.core.auto import SAME_NAME, decide, library_runs, owner_runs
 from mediaforge.core.matcher import Resolution
 from mediaforge.core.queue import ItemStatus, QueueItem
 from mediaforge.db.settings import AppSettings
@@ -153,11 +153,16 @@ def test_a_missing_preset_falls_back_to_the_built_in_one() -> None:
     assert run.preset.name == "Movie (Folder)"
 
 
-def test_a_target_outside_the_library_is_refused() -> None:
-    stray = movie()
-    stray.watched = Path(r"C:\elsewhere")  # not where the file is
+def test_a_target_outside_the_library_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Presets can't escape the library (names are cleaned), so the last guard is shown by hand.
+    from mediaforge.core import auto
+    from mediaforge.models.plan import Plan, PlannedFile
+
+    item = movie()
+    stray = PlannedFile(item_id=1, source=item.path, target=Path(r"C:\elsewhere\x.mkv"))
+    monkeypatch.setattr(auto, "build_plan", lambda *args, **kwargs: Plan(files=(stray,)))
     with pytest.raises(ValueError, match="outside"):
-        library_runs([stray], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+        owner_runs([item], SETTINGS, DEFAULT_PRESETS, lambda p: False)
 
 
 def test_a_moved_files_release_folder_is_planned_for_clean_up() -> None:
@@ -182,3 +187,47 @@ def test_a_held_file_keeps_its_folder() -> None:
     target = taken / "VisionQuest (2025) - S01E02 - Theseus.mkv"
     [run] = library_runs([episode()], SETTINGS, DEFAULT_PRESETS, lambda p: p == target)
     assert run.plan.leftovers == ()
+
+
+def test_a_remembered_episode_still_needs_its_numbers() -> None:
+    # A remembered match vouches for the show, not for the episode.
+    assert decide(episode(number=None, state=MatchState.REMEMBERED)) == (
+        False,
+        "No season or episode number in the name.",
+    )
+    assert decide(episode(known=False, state=MatchState.REMEMBERED)) == (
+        False,
+        "TMDB doesn't know this episode.",
+    )
+
+
+def test_two_downloads_wanting_one_name_both_wait() -> None:
+    first, second = movie(item_id=1), movie(item_id=2)
+    second.path = DOWNLOADS / "Dune.2021.Remux" / "Dune.2021.Remux.mkv"
+    [run] = library_runs([first, second], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+    assert run.plan.files == ()
+    assert run.held == {1: SAME_NAME, 2: SAME_NAME}
+
+
+def test_the_same_title_with_another_extension_is_already_there() -> None:
+    other = MOVIES / "Dune (2021)" / "Dune (2021).mp4"
+    [run] = library_runs([movie()], SETTINGS, DEFAULT_PRESETS, lambda p: p == other)
+    assert run.held == {1: "Already in the library."}
+
+
+def test_a_category_folder_is_never_cleaned() -> None:
+    loose = movie()
+    loose.path = DOWNLOADS / "Movies" / "Dune.2021.mkv"  # a downloader's category folder
+    [run] = library_runs([loose], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+    assert run.plan.leftovers == ()
+    release = movie()
+    release.path = DOWNLOADS / "Dune.2021.2160p.WEB-DL" / "Dune.2021.mkv"
+    [run] = library_runs([release], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+    assert [lo.folder for lo in run.plan.leftovers] == [release.path.parent]
+
+
+def test_a_file_outside_its_watched_folder_waits() -> None:
+    stray = movie()
+    stray.watched = Path(r"C:\elsewhere")  # not where the file is any more
+    [run] = library_runs([stray], SETTINGS, DEFAULT_PRESETS, lambda p: False)
+    assert run.plan.files == () and run.held == {1: "It isn't in a watched folder any more."}

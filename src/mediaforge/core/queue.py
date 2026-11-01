@@ -230,6 +230,14 @@ class Queue:
                 self._start_lookup(item)
             return [i.id for i in new_items]
 
+    def lookup_again(self, ids: Sequence[int]) -> None:
+        """Ask TMDB again (it couldn't be reached before)."""
+        for item_id in ids:
+            item = self.get(item_id)
+            if item is not None and item.status not in _FINISHED:
+                item.message = ""
+                self._start_lookup(item)
+
     def hold(self, item_id: int, reason: str) -> None:
         """A watched download waits for the owner, for `reason`."""
         item = self.get(item_id)

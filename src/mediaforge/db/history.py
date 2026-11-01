@@ -171,7 +171,8 @@ class HistoryRepo:
     async def was_undone(self, src: Path) -> bool:
         """Whether a rename away from `src` was undone (the file was put back there)."""
         async with self._db.conn.execute(
-            "SELECT 1 FROM operations WHERE kind = ? AND src = ? AND undo_state = ? LIMIT 1",
+            "SELECT 1 FROM operations WHERE kind = ? AND src = ? COLLATE NOCASE "
+            "AND undo_state = ? LIMIT 1",
             (OpKind.RENAME.value, str(src), UndoState.DONE.value),
         ) as cur:
             return await cur.fetchone() is not None

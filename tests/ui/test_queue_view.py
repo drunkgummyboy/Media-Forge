@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
@@ -676,3 +677,55 @@ async def test_the_preview_line_shows_where_a_download_goes(
     await pump(tk_root, 0.05)
     expected = "↳ " + str(Path("Movies", "Dune (2021)", "Dune (2021).mkv"))
     assert view.preview_line.cget("text").startswith(expected)
+
+
+async def test_forge_leaves_held_downloads_alone(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, movies = await library(view, tmp_path)
+    [held] = await watched(tk_root, view, downloads, "Dune.mkv")
+    view.services.queue.hold(held, "No year in the name: is it a movie?")
+    make_files(tmp_path / "in", ["Heat.1995.1080p.mkv"])
+    await add_and_settle(tk_root, view, tmp_path / "in")
+    view.select_preset("Movie (Flat)")
+    await view.settled()
+    view.refresh()
+    assert view.forge_button.cget("text") == "Forge 1 file"
+    await view.forge()
+    await pump(tk_root, 0.2)
+    assert (tmp_path / "in" / "Heat (1995).mkv").exists()
+    assert (downloads / "Dune.mkv").exists() and not any(movies.iterdir())
+
+
+async def test_cancel_reaches_a_download_move(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, _ = await library(view, tmp_path)
+    await watched(tk_root, view, downloads, "Dune.2021.mkv")
+    seen: list[object] = []
+    real = view.services.auto.rename
+
+    async def spy(ids: list[int], **kwargs: object) -> object:
+        seen.append(kwargs.get("cancel"))
+        return await real(ids, **kwargs)  # type: ignore[arg-type]
+
+    view.services.auto.rename = spy  # type: ignore[method-assign]
+    await view.forge()
+    assert seen and seen[0] is view._cancel  # pyright: ignore[reportPrivateUsage]
+
+
+async def test_a_done_band_undo_keeps_a_download_back(
+    tk_root: DnDCTk, view: QueueView, tmp_path: Path
+) -> None:
+    downloads, _, movies = await library(view, tmp_path)
+    await watched(tk_root, view, downloads, "Dune.2021.mkv")
+    band = next(r.key for r in view.list.rows if r.kind == "band")
+    view._on_band_action(band, "rename")  # pyright: ignore[reportPrivateUsage]
+    await pump_until(tk_root, (movies / "Dune (2021)" / "Dune (2021).mkv").exists)
+    await pump(tk_root, 0.2)
+    band = next(r.key for r in view.list.rows if r.kind == "band")
+    view._on_band_action(band, "undo")  # pyright: ignore[reportPrivateUsage]
+    await pump_until(tk_root, (downloads / "Dune.2021.mkv").exists)
+    await pump(tk_root, 0.2)
+    kept = (await view.services.settings.load()).kept_back
+    assert kept == [os.path.normcase(str(downloads / "Dune.2021.mkv"))]

@@ -14,6 +14,7 @@ import asyncio
 import logging
 import os
 import time
+from collections import Counter
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +25,7 @@ from mediaforge.core.executor import ProgressEvent, RunResult
 from mediaforge.core.formatter import render
 from mediaforge.core.library import inside, library_problems
 from mediaforge.core.matcher import normalize_title
+from mediaforge.core.parser import VIDEO_EXTENSIONS
 from mediaforge.core.planner import build_plan
 from mediaforge.core.queue import ItemStatus, QueueItem
 from mediaforge.core.watch import LOOK_INTERVAL_S, Watcher, candidates
@@ -39,6 +41,8 @@ if TYPE_CHECKING:
 log = logging.getLogger("mediaforge.auto")
 
 ALREADY_THERE = "Already in the library."
+SAME_NAME = "Two downloads would get the same name."
+NOT_WATCHED = "It isn't in a watched folder any more."
 _NOT_SURE = {
     MatchState.UNCERTAIN: "TMDB isn't sure which one it is.",
     MatchState.NOT_FOUND: "Not found at TMDB.",
@@ -56,20 +60,21 @@ class Decision(NamedTuple):
 def decide(item: QueueItem) -> Decision:
     """Whether `item` may be renamed and moved without the owner, and if not, why."""
     media, parsed = item.media, item.parsed
-    if media.match_state is MatchState.REMEMBERED:
-        return Decision(True, "")  # the owner confirmed this title before
-    if media.match_state is not MatchState.CONFIDENT:
+    remembered = media.match_state is MatchState.REMEMBERED
+    if not remembered and media.match_state is not MatchState.CONFIDENT:
         return Decision(False, _NOT_SURE[media.match_state])
+    if media.kind is MediaKind.EPISODE:  # a remembered show still needs a known episode
+        if parsed.season is None or parsed.episode is None:
+            return Decision(False, "No season or episode number in the name.")
+        if not media.episode_known:
+            return Decision(False, "TMDB doesn't know this episode.")
+    if remembered:
+        return Decision(True, "")  # the owner confirmed this title before
     if media.kind is MediaKind.MOVIE:
         if parsed.year is None:
             return Decision(False, "No year in the name: is it a movie?")
         if media.year != parsed.year:
             return Decision(False, _DISAGREE)
-    else:
-        if parsed.season is None or parsed.episode is None:
-            return Decision(False, "No season or episode number in the name.")
-        if not media.episode_known:
-            return Decision(False, "TMDB doesn't know this episode.")
     names = {normalize_title(media.title), normalize_title(media.original_title or "")}
     if normalize_title(parsed.title) not in names:
         return Decision(False, _DISAGREE)
@@ -102,6 +107,15 @@ def library_naming(
     return preset.format, Path(settings.movies_folder)
 
 
+def _other_copy(target: Path, exists: Callable[[Path], bool]) -> bool:
+    """The same title is in the library already as another kind of video file."""
+    return any(
+        exists(target.with_suffix(ext))
+        for ext in sorted(VIDEO_EXTENSIONS)
+        if ext != target.suffix.lower()
+    )
+
+
 def _same(a: Path, b: Path) -> bool:
     return os.path.normcase(str(a)) == os.path.normcase(str(b))
 
@@ -120,8 +134,12 @@ def _leftovers(
         if item.id not in moving or item.id in held:
             kept.add(key)
         elif item.watched is not None and inside(folder, item.watched):
-            if not _same(folder, item.watched):
+            title = normalize_title(item.parsed.title)
+            named_for_it = f"{normalize_title(folder.name)} ".startswith(f"{title} ")
+            if named_for_it and not _same(folder, item.watched):
                 folders.setdefault(key, (folder, []))[1].append(item.id)
+            else:
+                kept.add(key)  # a downloader's category folder, or the watched folder itself
     return tuple(
         PlannedLeftovers(folder=folder, item_ids=tuple(ids))
         for key, (folder, ids) in folders.items()
@@ -148,22 +166,28 @@ def _runs(
         library = Path(folder)
         preset = _preset(preset_name, fallback, presets)
         options = preset.options.model_copy(update={"clean_junk": False, "prune_empty": False})
-        for item in mine:
-            if item.watched is None or not inside(item.path, item.watched):
-                raise ValueError(f"{item.path} is outside the watched folders")
+        held: dict[int, str] = {
+            i.id: NOT_WATCHED for i in mine if i.watched is None or not inside(i.path, i.watched)
+        }
+        wanted = {
+            i.id: library.joinpath(*render(preset.format, i.media, i.path.suffix).parts)
+            for i in mine
+        }
+        if hold_taken:
+            claims = Counter(os.path.normcase(str(w)) for n, w in wanted.items() if n not in held)
+            for item_id, target in wanted.items():
+                if item_id not in held and claims[os.path.normcase(str(target))] > 1:
+                    held[item_id] = SAME_NAME
         inputs = [
             PlanInput(item_id=i.id, source=i.path, root=library, dropped_folder=None, media=i.media)
             for i in mine
+            if i.id not in held
         ]
         plan = build_plan(inputs, preset.format, options, exists)
-        held: dict[int, str] = {}
         if hold_taken:
-            wanted = {
-                i.id: library.joinpath(*render(preset.format, i.media, i.path.suffix).parts)
-                for i in mine
-            }
             for planned in plan.files:
-                if not _same(planned.target, wanted[planned.item_id]):
+                target = wanted[planned.item_id]
+                if not _same(planned.target, target) or _other_copy(target, exists):
                     held[planned.item_id] = ALREADY_THERE
             plan = plan.model_copy(
                 update={"files": tuple(f for f in plan.files if f.item_id not in held)}
@@ -275,6 +299,7 @@ class AutoRenamer:
         self._undone: set[int] = set()  # put back by an undo: never moved on its own again
         self._lost: dict[str, Path] = {}  # folders that couldn't be reached at the last look
         self._task: asyncio.Task[None] | None = None
+        self._stop_task: asyncio.Task[None] | None = None
         self._wake = asyncio.Event()
         self._stopping = False
         self._cancel = asyncio.Event()
@@ -310,12 +335,21 @@ class AutoRenamer:
     def reconfigure(self) -> None:
         """The settings changed: start, stop, or look again at once."""
         if self._services.app_settings.automatic == "off":
-            if self.running:
-                asyncio.get_running_loop().create_task(self.stop())
+            if self.running and not self._stopping:
+                self._stopping = True  # known at once, before the stop task gets its turn
+                self._stop_task = asyncio.get_running_loop().create_task(self.stop())
             self.on_status(self.status([]))
+        elif self._stopping and self.running:  # Off was chosen a moment ago: start again after
+            asyncio.get_running_loop().create_task(self._start_after_stop())
         elif self.running:
             self.look_soon()
         else:
+            self.start()
+
+    async def _start_after_stop(self) -> None:
+        if self._stop_task is not None:
+            await asyncio.gather(self._stop_task, return_exceptions=True)
+        if self._services.app_settings.automatic != "off":
             self.start()
 
     async def _loop(self) -> None:
@@ -377,12 +411,26 @@ class AutoRenamer:
             and _key(file) not in known
             and not any(inside(file, lib) for lib in libraries)  # never taken back out
         ]
-        undone = {_key(f) for f, _ in fresh if await services.history.was_undone(f)}
+        kept = set(settings.kept_back)
+        undone = {
+            _key(f) for f, _ in fresh if _key(f) in kept or await services.history.was_undone(f)
+        }
         new_ids = await queue.add_watched(fresh)
+        offline = []
+        if services.tmdb is not None:  # TMDB couldn't be reached before: ask again
+            offline = [
+                i.id
+                for i in queue.items
+                if i.watched is not None
+                and i.status in (ItemStatus.READY, ItemStatus.HELD)
+                and i.media.match_state is MatchState.OFFLINE
+                and i.id not in self._undone
+            ]
+            queue.lookup_again(offline)
         await queue.wait_idle()
 
         held_before = self._needing_owner()
-        for item_id in [*new_ids, *self._retry]:
+        for item_id in [*new_ids, *self._retry, *offline]:
             item = queue.get(item_id)
             if item is None or item.status in _DONE:
                 continue
@@ -396,6 +444,18 @@ class AutoRenamer:
             if not verdict.sure and item.status is not ItemStatus.NEEDS_CHOICE:
                 queue.hold(item_id, verdict.reason)
         self._retry.clear()
+        newly_kept = {_key(i.path) for i in queue.items if i.id in self._undone} - kept
+        present_keys = {_key(f) for f, _ in listed}
+        lost_keys = {_key(r) for r in lost_roots}
+        still_kept = {
+            k
+            for k in kept | newly_kept
+            if k in present_keys
+            or any(k.startswith(r) for r in lost_keys)
+            or await asyncio.to_thread(fsops.exists, Path(k))
+        }  # forgotten once the file has left the download folder
+        if still_kept != kept:
+            await self._save_kept(still_kept)
 
         renamed = 0
         if settings.automatic == "on":
@@ -414,8 +474,7 @@ class AutoRenamer:
             elif movers:
                 renamed = (await self._run(movers, RunSource.AUTOMATIC, owner=False)).renamed
 
-        lost_keys = {_key(r) for r in lost_roots}
-        present = {_key(f) for f, _ in listed} | {
+        present = present_keys | {
             _key(i.path)
             for i in queue.items
             if i.watched is not None and _key(i.watched) in lost_keys
@@ -461,8 +520,10 @@ class AutoRenamer:
         *,
         source: RunSource,
         on_progress: Callable[[ProgressEvent], None] | None = None,
+        cancel: asyncio.Event | None = None,
     ) -> RunResult:
-        """The owner's Rename on watched downloads: into the library, whatever decide says."""
+        """The owner's Rename on watched downloads: into the library, whatever decide says.
+        `cancel` is the Inbox's (its Cancel button, or closing), not the renamer's own."""
         queue = self._services.queue
         items = [
             i
@@ -474,11 +535,28 @@ class AutoRenamer:
             for item in items:
                 queue.hold(item.id, problems[0])
             return RunResult()
+        kept = set(self._services.app_settings.kept_back)
         for item in items:
             self._undone.discard(item.id)
+            kept.discard(_key(item.path))
             if item.status is ItemStatus.HELD:
                 item.status, item.message = ItemStatus.READY, ""
-        return await self._run(items, source, owner=True, on_progress=on_progress)
+        if kept != set(self._services.app_settings.kept_back):
+            await self._save_kept(kept)
+        return await self._run(
+            items, source, owner=True, on_progress=on_progress, cancel=cancel or asyncio.Event()
+        )
+
+    async def keep_back(self, paths: Sequence[Path]) -> None:
+        """Put back by an undo: these downloads are never moved on their own again."""
+        await self._save_kept(set(self._services.app_settings.kept_back) | {_key(p) for p in paths})
+
+    async def _save_kept(self, kept: set[str]) -> None:
+        services = self._services
+        change = {"kept_back": sorted(kept)}
+        services.app_settings = services.app_settings.model_copy(update=change)
+        stored = await services.settings.load()
+        await services.settings.save(stored.model_copy(update=change))
 
     async def _run(
         self,
@@ -487,11 +565,19 @@ class AutoRenamer:
         *,
         owner: bool,
         on_progress: Callable[[ProgressEvent], None] | None = None,
+        cancel: asyncio.Event | None = None,
     ) -> RunResult:
         services = self._services
         queue = services.queue
         total = RunResult()
+        stop = cancel if cancel is not None else self._cancel
         async with services.run_lock:
+            # Things may have changed while waiting for the lock: the mode, or the files.
+            if not owner and services.app_settings.automatic != "on":
+                return total
+            items = [i for i in items if queue.get(i.id) is i and i.status is ItemStatus.READY]
+            if not items:
+                return total
             presets = await services.presets.list()
             make = owner_runs if owner else library_runs
             runs = await asyncio.to_thread(make, items, services.app_settings, presets)
@@ -528,7 +614,7 @@ class AutoRenamer:
                     source=source,
                     preset_name=run.preset.name,
                     on_progress=progress,
-                    cancel=self._cancel,
+                    cancel=stop,
                     kinds={run.kind},
                 )
                 for item_id in finished:

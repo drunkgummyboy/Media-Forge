@@ -125,3 +125,42 @@ def test_exclusive_open_sees_a_file_in_use(tmp_path: Path) -> None:
     with open(file, "rb"):
         assert not exclusive_open(file)  # a downloader (or anything) still has it open
     assert not exclusive_open(tmp_path / "gone.mkv")
+
+
+def test_a_folder_still_downloading_holds_back_its_finished_files(tmp_path: Path) -> None:
+    pack = tmp_path / "Show.S01.1080p"
+    video(pack / "Show.S01E01.mkv")
+    video(pack / "Show.S01E02.mkv.!qB")  # the rest of the pack is still coming in
+    done = video(tmp_path / "Other.S01" / "Other.S01E01.mkv")
+    assert candidates(tmp_path) == [done]
+
+
+def test_extras_are_never_candidates(tmp_path: Path) -> None:
+    from mediaforge.core.watch import is_extra
+
+    for name in (
+        "Dune.2021/Dune.2021.1080p-trailer.mkv",
+        "Dune.2021/Extras/Making Of.mkv",
+        "Dune.2021/Featurettes/Sandworms.mkv",
+        "Show.S01/Show.S01.Behind.the.Scenes.mkv",
+        "Show.S01/Deleted Scenes.mkv",
+    ):
+        video(tmp_path / name)
+    movie = video(tmp_path / "Dune.2021" / "Dune.2021.1080p.mkv")
+    assert candidates(tmp_path) == [movie]
+    assert is_extra(Path("Dune.Trailer.mkv")) and not is_extra(Path("Trailer.Park.Boys.S01E01.mkv"))
+
+
+def test_a_preallocated_file_is_not_finished(tmp_path: Path) -> None:
+    from mediaforge.core.watch import looks_filled
+
+    clock = Clock(1_000_000)
+    empty = tmp_path / "stalled.mkv"
+    empty.write_bytes(bytes(2_000_000))  # full size, but nothing written yet: all zeros
+    os.utime(empty, (clock.now - 3600, clock.now - 3600))
+    real = video(tmp_path / "real.mkv", size=2_000_000, clock=clock)
+    assert not looks_filled(empty) and looks_filled(real)
+    w = Watcher(now=clock, can_open=lambda p: True)
+    w.finished([empty, real])
+    clock.now += 300
+    assert w.finished([empty, real]) == [real]

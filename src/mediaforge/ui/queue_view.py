@@ -665,7 +665,7 @@ class QueueView(ctk.CTkFrame):
                 self.empty_title.configure(text=_EMPTY_TITLE)
                 self.empty_hint.configure(text=_EMPTY_HINT)
             self.empty_state.pack(fill="both", expand=True)
-        pending = len(self.pending_items())
+        pending = len(self._pending(None))
         self.count_label.configure(text=f"{len(items)} file{'s' if len(items) != 1 else ''}")
         if not self.running:
             self.forge_button.configure(
@@ -927,7 +927,7 @@ class QueueView(ctk.CTkFrame):
     @_one_at_a_time
     async def preview(self) -> None:
         await self.settled()
-        items = self.pending_items()
+        items = [i for i in self.pending_items() if i.watched is None]  # downloads: see their bands
         if not items:
             return
         inputs = self.services.queue.plan_inputs([i.id for i in items])
@@ -937,7 +937,13 @@ class QueueView(ctk.CTkFrame):
             log.info(line)
 
     def _pending(self, only: Sequence[int] | None) -> list[QueueItem]:
-        pending = self.pending_items()
+        """What Forge renames: a band's files, or (Forge for all) everything except downloads
+        that wait for the owner (those go through their own band's Rename only)."""
+        pending = [
+            i
+            for i in self.pending_items()
+            if only is not None or i.watched is None or i.status not in _NEEDS_OWNER
+        ]
         return pending if only is None else [i for i in pending if i.id in set(only)]
 
     @_one_at_a_time
@@ -956,7 +962,10 @@ class QueueView(ctk.CTkFrame):
             watched = [i.id for i in items if i.watched is not None]
             if watched:  # into the library, with the Series or Movies preset
                 result = await self.services.auto.rename(
-                    watched, source=RunSource.APP, on_progress=self._on_watched_progress
+                    watched,
+                    source=RunSource.APP,
+                    on_progress=self._on_watched_progress,
+                    cancel=self._cancel,
                 )
             dropped = [i for i in items if i.watched is None]
             if dropped:
@@ -1009,18 +1018,21 @@ class QueueView(ctk.CTkFrame):
         queue, history = self.services.queue, self.services.history
         items = [i for i in (queue.get(n) for n in ids) if i is not None and i.run_id is not None]
         op_ids: list[int] = []
+        put_back: list[Path] = []  # downloads that return to their folder
         async with self.services.run_lock:
             for item in items:
                 ops = await history.operations(item.run_id or 0)
-                op_ids += [
-                    o.id
-                    for o in ops
-                    if o.kind is OpKind.RENAME and o.dst == str(item.path) and o.undoable
-                ]
+                for o in ops:
+                    if o.kind is OpKind.RENAME and o.dst == str(item.path) and o.undoable:
+                        op_ids.append(o.id)
+                        if item.watched is not None and o.src:
+                            put_back.append(Path(o.src))
             if not op_ids:
                 log.info("Nothing to undo for these files.")
                 return
             result = await self.services.undo.undo_operations(op_ids)
+        if put_back:  # never moved on their own again; Rename moves them when wanted
+            await self.services.auto.keep_back(put_back)
         for item in items:
             queue.remove(item.id)
         log.info("Put back %d file(s)", result.undone, extra={"success": True})

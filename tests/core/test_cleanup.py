@@ -74,3 +74,20 @@ def test_download_leftovers_are_samples_and_notes_only(tmp_path: Path) -> None:
     touch(release / "Screens" / "shot1.jpg")  # pictures stay
     touch(release / "show.s01e01.mkv")  # the video itself is never a leftover
     assert set(download_leftovers(release)) == junk
+
+
+def test_a_folder_with_a_download_still_coming_in_is_busy(tmp_path: Path) -> None:
+    import os
+    import time
+
+    from mediaforge.core.cleanup import download_busy
+
+    folder = tmp_path / "Show.S01"
+    old = touch(folder / "show.nfo")
+    os.utime(old, (time.time() - 3600, time.time() - 3600))
+    assert not download_busy(folder, time.time())
+    touch(folder / "Show.S01E02.mkv.!qB")
+    assert download_busy(folder, time.time())
+    (folder / "Show.S01E02.mkv.!qB").unlink()
+    touch(folder / "fresh.txt")  # written a moment ago
+    assert download_busy(folder, time.time())

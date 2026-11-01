@@ -342,6 +342,7 @@ async def test_a_staged_update_restarts_into_the_tray_when_hidden(
     finally:
         tk_root.deiconify()
     assert shell.restart_requested and shell.restart_hidden and closed == [1]
+    assert (await services.settings.load()).quiet_restart_for.startswith("9.9.9 ")
 
 
 async def test_a_staged_update_waits_while_the_window_shows(
@@ -367,3 +368,24 @@ async def test_the_update_check_repeats_daily(shell: MainShell, services: Servic
     await asyncio.sleep(0.15)
     task.cancel()
     assert fake.checks >= 3
+
+
+async def test_a_failed_update_doesnt_restart_again_the_same_day(
+    tk_root: DnDCTk, shell: MainShell, services: Services
+) -> None:
+    from datetime import date
+
+    from helpers.fake_updates import FakeUpdates
+
+    services.updates = FakeUpdates("9.9.9")  # type: ignore[assignment]
+    services.app_settings = services.app_settings.model_copy(
+        update={"quiet_restart_for": f"9.9.9 {date.today().isoformat()}"}
+    )
+    shell.on_close = lambda: None
+    tk_root.withdraw()
+    try:
+        await shell.check_for_update(delay_s=0)
+        await pump(tk_root, 0.05)
+    finally:
+        tk_root.deiconify()
+    assert not shell.restart_requested  # restarted for 9.9.9 today already: it didn't install

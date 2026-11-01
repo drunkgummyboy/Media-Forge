@@ -432,7 +432,7 @@ function Install-MediaForge {
 
     $mainPy = Join-Path $InstallDir 'main.py'
     if ((Test-Path -LiteralPath $mainPy) -and (Test-AppRunning $mainPy)) {
-        throw 'MediaForge is open. Close it, then run the install command again.'
+        throw 'MediaForge is open. Quit it (it may be in the tray next to the clock: right-click its icon, Quit), then run the install command again.'
     }
 
     # winget installs Python below; there is a fallback without it.

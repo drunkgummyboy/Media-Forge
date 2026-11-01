@@ -24,6 +24,18 @@ TEMP_SUFFIXES = (".part", ".!qb", ".crdownload", ".tmp", ".partial", ".download"
 SKIP_FOLDERS = frozenset({"@eadir", "#recycle", "#snapshot", "$recycle.bin"})
 # "sample" as a word of its own: "-sample", ".Sample.", "_sample" (not "Samples.Of.Life").
 _SAMPLE = re.compile(r"(?<![a-z0-9])sample(?![a-z0-9])", re.IGNORECASE)
+# Extras that come with a release: never the movie or the episode itself.
+_SEP = r"[\s._-]+"
+_EXTRA_PHRASE = re.compile(
+    rf"(?<![a-z0-9])(featurettes?|behind{_SEP}the{_SEP}scenes|deleted{_SEP}scenes|making{_SEP}of)"
+    r"(?![a-z0-9])",
+    re.IGNORECASE,
+)
+_TRAILER = re.compile(r"(?<![a-z0-9])trailers?(?![a-z0-9])", re.IGNORECASE)
+EXTRA_FOLDERS = frozenset(
+    {"extras", "featurettes", "behind the scenes", "deleted scenes", "trailers", "interviews"}
+)
+SAMPLE_BYTES = 64 * 1024  # each spot read to tell a written file from a pre-allocated one
 
 _GENERIC_READ = 0x80000000
 _OPEN_EXISTING = 3
@@ -34,8 +46,22 @@ def is_sample(path: Path) -> bool:
     return _SAMPLE.search(path.stem) is not None
 
 
+def is_extra(path: Path) -> bool:
+    """A trailer, featurette or deleted scene; "Trailer.Park.Boys" (a title) is not."""
+    stem = path.stem
+    if _EXTRA_PHRASE.search(stem):
+        return True
+    trailer = _TRAILER.search(stem)
+    return trailer is not None and trailer.start() > 0
+
+
 def _skip_folder(name: str) -> bool:
-    return name.lower() in SKIP_FOLDERS or name.startswith(".")
+    low = name.lower()
+    return low in SKIP_FOLDERS or low in EXTRA_FOLDERS or name.startswith(".")
+
+
+def _in_progress(name: str) -> bool:
+    return name.lower().endswith(TEMP_SUFFIXES)
 
 
 def candidates(root: Path) -> list[Path]:
@@ -48,10 +74,14 @@ def candidates(root: Path) -> list[Path]:
     found: list[Path] = []
     for folder, dirs, names in os.walk(fsops.long_path(root)):
         dirs[:] = [d for d in dirs if not _skip_folder(d)]
+        if any(_in_progress(n) for n in names):
+            continue  # part of this release is still coming in: none of it is finished yet
         lower = {n.lower() for n in names}
         for name in names:
             path = Path(name)
             if name.startswith(("~", ".")) or not is_video(path) or is_sample(path):
+                continue
+            if is_extra(path):
                 continue
             if any(f"{name}{suffix}".lower() in lower for suffix in TEMP_SUFFIXES):
                 continue  # the downloader keeps a marker beside a file it is still writing
@@ -71,6 +101,23 @@ def exclusive_open(path: Path) -> bool:
     return True
 
 
+def looks_filled(path: Path) -> bool:
+    """False when a spot of the file is still all zeros: a downloader reserved the space but the
+    data hasn't arrived (a stalled torrent can sit full size and untouched for hours)."""
+    try:
+        with open(fsops.long_path(path), "rb") as f:
+            size = os.fstat(f.fileno()).st_size
+            spots = {0, size // 4, size // 2, 3 * size // 4, max(0, size - SAMPLE_BYTES)}
+            for spot in sorted(spots):
+                f.seek(spot)
+                chunk = f.read(SAMPLE_BYTES)
+                if chunk and not chunk.strip(b"\0"):
+                    return False
+    except OSError:
+        return False
+    return True
+
+
 class Watcher:
     """Remembers what each file looked like at the last look."""
 
@@ -80,11 +127,14 @@ class Watcher:
         now: Callable[[], float] = time.time,
         stat: Callable[[Path], tuple[int, int]] = fsops.stamp,
         can_open: Callable[[Path], bool] = exclusive_open,
+        filled: Callable[[Path], bool] = looks_filled,
     ) -> None:
         self._now = now
         self._stat = stat
         self._can_open = can_open
+        self._filled = filled
         self._seen: dict[str, tuple[int, int]] = {}
+        self._filled_at: dict[str, tuple[int, int]] = {}  # read once per version of a file
 
     def finished(self, files: Sequence[Path]) -> list[Path]:
         """The files among this look's `files` that have finished downloading."""
@@ -101,7 +151,16 @@ class Watcher:
             if self._seen.get(key) != stamp:
                 continue  # new, or still changing
             quiet = now - stamp[1] / 1_000_000_000 >= QUIET_S
-            if quiet and self._can_open(file):
+            if quiet and self._can_open(file) and self._is_filled(key, file, stamp):
                 done.append(file)
         self._seen = seen
+        self._filled_at = {k: v for k, v in self._filled_at.items() if k in seen}
         return done
+
+    def _is_filled(self, key: str, file: Path, stamp: tuple[int, int]) -> bool:
+        if self._filled_at.get(key) == stamp:
+            return True
+        if not self._filled(file):
+            return False
+        self._filled_at[key] = stamp
+        return True

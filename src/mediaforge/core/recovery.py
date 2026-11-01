@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 from pathlib import Path
 
@@ -64,9 +65,19 @@ def _undo_happened(op: Operation) -> bool | None:
             return False
 
 
+def _clear_partial(dst: Path) -> None:
+    """A copy between shares cut off by a crash: its partial file goes; the source is intact."""
+    partial = fsops.partial_path(dst)
+    if _exists(partial):
+        with contextlib.suppress(OSError):
+            fsops.remove_file(partial)
+
+
 async def recover(history: HistoryRepo) -> int:
     settled = 0
     for op in await history.pending_operations():
+        if op.kind is OpKind.RENAME and op.dst:
+            await asyncio.to_thread(_clear_partial, Path(op.dst))
         happened = await asyncio.to_thread(_change_happened, op)
         if happened is None:
             continue  # folder not reachable now: try again next start

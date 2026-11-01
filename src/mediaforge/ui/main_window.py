@@ -10,6 +10,7 @@ import asyncio
 import logging
 import tkinter as tk
 from collections.abc import Callable, Sequence
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -331,8 +332,15 @@ class MainShell(ctk.CTkFrame):
             self._staged = version
         if not self.winfo_exists():
             return
-        if hidden:  # in the tray: restart into the tray now, so the update installs
+        marker = f"{version} {date.today().isoformat()}"
+        if hidden and self.services.app_settings.quiet_restart_for != marker:
+            # In the tray: restart into the tray now, so the update installs. Once a day per
+            # version: if it didn't install (a locked file), the next restart waits for tomorrow.
             log.info("Restarting into the tray to install MediaForge %s", version)
+            change = {"quiet_restart_for": marker}
+            self.services.app_settings = self.services.app_settings.model_copy(update=change)
+            stored = await self.services.settings.load()
+            await self.services.settings.save(stored.model_copy(update=change))
             self.restart_hidden = True
             self.request_restart()
             return

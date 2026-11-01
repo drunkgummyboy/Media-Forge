@@ -37,6 +37,8 @@ class AppSettings(BaseModel):
     daily_summary: bool = True
     summary_sent_on: str = ""  # ISO date of the last evening summary
     tray_notice_shown: bool = False
+    kept_back: list[str] = []  # downloads put back by an undo: never moved on their own again
+    quiet_restart_for: str = ""  # "<version> <date>": restarted in the tray once for it
 
 
 class SettingsRepo:

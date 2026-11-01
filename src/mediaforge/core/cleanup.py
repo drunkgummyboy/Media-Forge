@@ -9,7 +9,7 @@ from pathlib import Path
 
 from mediaforge.core import fsops
 from mediaforge.core.parser import VIDEO_EXTENSIONS
-from mediaforge.core.watch import is_sample
+from mediaforge.core.watch import QUIET_S, TEMP_SUFFIXES, is_sample
 
 JUNK_NAMES = frozenset({"thumbs.db", ".ds_store", "desktop.ini"})
 # Notes a release ships beside its video; subtitles and pictures are not among them.
@@ -79,3 +79,17 @@ def videos_left(folder: Path) -> bool:
         for _, files in fsops.walk(folder)
         for f in files
     )
+
+
+def download_busy(folder: Path, now: float) -> bool:
+    """Whether something in `folder` is still being downloaded or was written very recently."""
+    for dirpath, files in fsops.walk(folder):
+        for name in files:
+            if name.lower().endswith(TEMP_SUFFIXES):
+                return True
+            try:
+                if now - fsops.stamp(Path(dirpath) / name)[1] / 1_000_000_000 < QUIET_S:
+                    return True
+            except OSError:
+                return True
+    return False

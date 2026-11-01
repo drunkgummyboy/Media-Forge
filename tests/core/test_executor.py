@@ -1,4 +1,6 @@
 import asyncio
+import os
+import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -289,9 +291,11 @@ def download(tmp_path: Path, extra: tuple[str, ...] = ()) -> tuple[Plan, Path]:
     from mediaforge.models.plan import PlannedLeftovers
 
     release = tmp_path / "dl" / "Heat.1995.1080p-GRP"
+    old = time.time() - 3600  # written with the download, an hour ago
     for name in ("Sample/heat-sample.mkv", "heat.nfo", "RARBG.txt", *extra):
         (release / name).parent.mkdir(parents=True, exist_ok=True)
         (release / name).write_bytes(b"x")
+        os.utime(release / name, (old, old))
     [item] = make_inputs(release, {"heat.1995.mkv": "Heat"})
     item = item.model_copy(update={"root": tmp_path / "lib", "dropped_folder": None})
     plan = build_plan([item], "{ny}/{ny}", PresetOptions())
@@ -329,3 +333,12 @@ async def test_leftovers_stay_when_another_video_is_left(
     result = await run(history, plan)
     assert result.renamed == 1
     assert (release / "heat.nfo").exists() and (release / "heat.extras.mkv").exists()
+
+
+async def test_leftovers_stay_while_another_download_is_coming_in(
+    tmp_path: Path, history: HistoryRepo
+) -> None:
+    plan, release = download(tmp_path, extra=("heat.part2.mkv.!qB",))
+    result = await run(history, plan)
+    assert result.renamed == 1
+    assert (release / "heat.nfo").exists()

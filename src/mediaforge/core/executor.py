@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import Callable, Collection
 from pathlib import Path
 from typing import Literal, Protocol, TypeVar, cast
@@ -11,7 +12,12 @@ from typing import Literal, Protocol, TypeVar, cast
 from pydantic import BaseModel
 
 from mediaforge.core import fsops
-from mediaforge.core.cleanup import download_leftovers, find_cleanup_targets, videos_left
+from mediaforge.core.cleanup import (
+    download_busy,
+    download_leftovers,
+    find_cleanup_targets,
+    videos_left,
+)
 from mediaforge.db.history import HistoryRepo
 from mediaforge.models.history import OpKind, RunSource
 from mediaforge.models.media import MediaKind
@@ -148,6 +154,8 @@ class Executor:
                 continue
             if await asyncio.to_thread(videos_left, planned.folder):
                 continue
+            if await asyncio.to_thread(download_busy, planned.folder, time.time()):
+                continue  # something else in it is still coming in
             for junk in await asyncio.to_thread(download_leftovers, planned.folder):
                 await self._delete(run_id, junk, result)
             folders = await asyncio.to_thread(fsops.walk, planned.folder)
